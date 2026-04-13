@@ -1,67 +1,7 @@
 # forward chaining FOL, with optimizations
 import time
 
-
-class Term: pass
-
-class Const(Term):
-    def __init__(self, name): self.name = name
-    def __eq__(self, other): return isinstance(other, Const) and self.name == other.name
-    def __hash__(self): return hash(self.name)
-    def __repr__(self): return str(self.name)
-
-class Var(Term):
-    def __init__(self, name): self.name = name
-    def __eq__(self, other): return isinstance(other, Var) and self.name == other.name
-    def __hash__(self): return hash(self.name)
-    def __repr__(self): return f"?{self.name}"
-
-class Predicate:
-    def __init__(self, name, terms):
-        self.name = name
-        self.terms = terms
-    def __eq__(self, other):
-        return isinstance(other, Predicate) and self.name == other.name and self.terms == other.terms
-    def __hash__(self):
-        return hash((self.name, tuple(self.terms)))
-    def __repr__(self):
-        return f"{self.name}({', '.join(map(str, self.terms))})"
-
-class NativeMath(Predicate):
-    def __init__(self, func, terms):
-        super().__init__("NativeMath", terms)
-        self.func = func
-
-class Rule:
-    def __init__(self, premises, conclusion):
-        self.premises = premises       
-        self.conclusion = conclusion   
-    def __repr__(self):
-        return f"{' ^ '.join(map(str, self.premises))} => {self.conclusion}"
-
-# ==========================================
-# 2. The UNIFY Algorithm
-# ==========================================
-
-def unify(x, y, theta):
-    if theta is None: return None
-    elif x == y: return theta
-    elif isinstance(x, Var): return unify_var(x, y, theta)
-    elif isinstance(y, Var): return unify_var(y, x, theta)
-    elif isinstance(x, Predicate) and isinstance(y, Predicate):
-        if x.name != y.name or len(x.terms) != len(y.terms): return None
-        for i in range(len(x.terms)):
-            theta = unify(x.terms[i], y.terms[i], theta)
-        return theta
-    else: return None
-
-def unify_var(var, x, theta):
-    if var in theta: return unify(theta[var], x, theta)
-    elif x in theta: return unify(var, theta[x], theta)
-    else:
-        new_theta = theta.copy()
-        new_theta[var] = x
-        return new_theta
+from myfol import *
 
 def substitute(theta, predicate):
     new_terms = []
@@ -132,10 +72,6 @@ def fol_fc(kb, rules):
     
     # print("--- Forward Chaining Exhausted ---")
     return kb
-
-# ==========================================
-# 4. Futoshiki Ruleset (3x3 Native-Optimized)
-# ==========================================
 
 i, j, k = Var("i"), Var("j"), Var("k")
 v, v1, v2 = Var("v"), Var("v1"), Var("v2")
@@ -445,7 +381,7 @@ def load_futoshiki(file_name: str):
     return N, kb, rules
     
 def mainfunc2():
-    n, kb, rules = load_futoshiki("input-01.txt")
+    n, kb, rules = load_futoshiki("puzzle.txt")
     time_start = time.perf_counter()
     final_kb = fol_fc(kb, rules)
     time_running = time.perf_counter() - time_start
