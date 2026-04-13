@@ -14,7 +14,7 @@ class FutoshikiFetcher:
         "sec-fetch-dest": "empty",
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-origin",
-        "cookie": "_ga=GA1.1.698886926.1774260194; _ga_SJ12DKC7XE=GS2.1.s1775631511$o3$g1$t1775631921$j37$l0$h0",
+        "cookie": "",
         "Referer": "https://www.futoshiki.com/"
     }
     
@@ -169,10 +169,51 @@ class FutoshikiFetcher:
         
         return board, answer, constraints
 
+def write_to_file(puzzle, filename):
+    size = puzzle['size']
+    board = puzzle['board']
+    constraints = puzzle['constraints']
+    
+    # Convert constraints to a set for faster lookup
+    constraint_set = set(constraints)
+    
+    with open(filename, 'w') as f:
+        # Write size
+        f.write(f"{size}\n\n")
+                
+        # Write board
+        for row in board:
+            f.write(', '.join(str(x) for x in row) + '\n')
+        f.write('\n')
+                
+        # Write horizontal constraints
+        for r in range(size):
+            horiz_row = []
+            for c in range(size - 1):
+                if ((r, c), (r, c + 1)) in constraint_set:
+                    horiz_row.append('1')
+                elif ((r, c + 1), (r, c)) in constraint_set:
+                    horiz_row.append('-1')
+                else:
+                    horiz_row.append('0')
+            f.write(', '.join(horiz_row) + '\n')
+        f.write('\n')
+        
+        # Write vertical constraints
+        for r in range(size - 1):
+            vert_row = []
+            for c in range(size):
+                if ((r, c), (r + 1, c)) in constraint_set:
+                    vert_row.append('1')
+                elif ((r + 1, c), (r, c)) in constraint_set:
+                    vert_row.append('-1')
+                else:
+                    vert_row.append('0')
+            f.write(', '.join(vert_row) + '\n')
 
 if __name__ == "__main__":
     # Test
-    puzzle = FutoshikiFetcher.fetch_puzzle(size=6, difficulty=2, game_id=6767)
+    puzzle = FutoshikiFetcher.fetch_puzzle(size=7, difficulty=1, game_id=6767)
     if puzzle:
         print(f"Board:")
         for row in puzzle['board']:
@@ -182,3 +223,4 @@ if __name__ == "__main__":
             print(row)
         print(f"\nConstraints:")
         print(puzzle['constraints'])
+    write_to_file(puzzle, "puzzle3.txt")
