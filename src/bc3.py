@@ -3,7 +3,7 @@ from typing import TypeAlias, TypeVar
 from collections.abc import Iterator
 import time
 
-from myfol import *
+from src.myfol import *
 
 def subst(theta: Theta, x):
     if isinstance(x, Var):

@@ -1,64 +1,7 @@
-# forward chaining FOL
-class Term: pass
+# forward chaining FOL, with optimizations
+import time
 
-class Const(Term):
-    def __init__(self, name): self.name = name
-    def __eq__(self, other): return isinstance(other, Const) and self.name == other.name
-    def __hash__(self): return hash(self.name)
-    def __repr__(self): return str(self.name)
-
-class Var(Term):
-    def __init__(self, name): self.name = name
-    def __eq__(self, other): return isinstance(other, Var) and self.name == other.name
-    def __hash__(self): return hash(self.name)
-    def __repr__(self): return f"?{self.name}"
-
-class Predicate:
-    def __init__(self, name, terms):
-        self.name = name
-        self.terms = terms
-    def __eq__(self, other):
-        return isinstance(other, Predicate) and self.name == other.name and self.terms == other.terms
-    def __hash__(self):
-        return hash((self.name, tuple(self.terms)))
-    def __repr__(self):
-        return f"{self.name}({', '.join(map(str, self.terms))})"
-
-class NativeMath(Predicate):
-    def __init__(self, func, terms):
-        super().__init__("NativeMath", terms)
-        self.func = func
-
-class Rule:
-    def __init__(self, premises, conclusion):
-        self.premises = premises       
-        self.conclusion = conclusion   
-    def __repr__(self):
-        return f"{' ^ '.join(map(str, self.premises))} => {self.conclusion}"
-
-# ==========================================
-# 2. The UNIFY Algorithm
-# ==========================================
-
-def unify(x, y, theta):
-    if theta is None: return None
-    elif x == y: return theta
-    elif isinstance(x, Var): return unify_var(x, y, theta)
-    elif isinstance(y, Var): return unify_var(y, x, theta)
-    elif isinstance(x, Predicate) and isinstance(y, Predicate):
-        if x.name != y.name or len(x.terms) != len(y.terms): return None
-        for i in range(len(x.terms)):
-            theta = unify(x.terms[i], y.terms[i], theta)
-        return theta
-    else: return None
-
-def unify_var(var, x, theta):
-    if var in theta: return unify(theta[var], x, theta)
-    elif x in theta: return unify(var, theta[x], theta)
-    else:
-        new_theta = theta.copy()
-        new_theta[var] = x
-        return new_theta
+from src.myfol import *
 
 def substitute(theta, predicate):
     new_terms = []
@@ -84,6 +27,7 @@ def match_premises(premises, kb, theta):
     first_premise = premises[0]
     rest_premises = premises[1:]
     
+    # Intercept Native Math
     if isinstance(first_premise, NativeMath):
         bound_terms = []
         for term in first_premise.terms:
@@ -98,7 +42,10 @@ def match_premises(premises, kb, theta):
                 yield from match_premises(rest_premises, kb, theta)
         return 
 
-    for fact in list(kb):
+    # --- OPTIMIZATION: Hash Map Lookup ---
+    # Only try to unify with facts that share the exact same predicate name.
+    # If looking for a "Val", only loop through known "Val" facts!
+    for fact in kb.get(first_premise.name, set()):
         theta_new = unify(first_premise, fact, theta.copy())
         if theta_new is not None:
             yield from match_premises(rest_premises, kb, theta_new)
@@ -110,23 +57,21 @@ def fol_fc(kb, rules):
     
     while new_facts_found:
         new_facts_found = False
-        print(f"Iteration {iteration} running...")
+        # print(f"Iteration {iteration} running...")
         
         for rule in rules:
             for theta in match_premises(rule.premises, kb, {}):
                 q_prime = substitute(theta, rule.conclusion)
                 
-                if q_prime not in kb:
-                    kb.add(q_prime)
+                # --- OPTIMIZATION: Dictionary Insertion ---
+                category = kb.setdefault(q_prime.name, set())
+                if q_prime not in category:
+                    category.add(q_prime)
                     new_facts_found = True
         iteration += 1
     
     # print("--- Forward Chaining Exhausted ---")
     return kb
-
-# ==========================================
-# 4. Futoshiki Ruleset (3x3 Native-Optimized)
-# ==========================================
 
 i, j, k = Var("i"), Var("j"), Var("k")
 v, v1, v2 = Var("v"), Var("v1"), Var("v2")
@@ -284,6 +229,10 @@ base_rules = [
     )
 ]
 
+def add_fact(kb, fact):
+    """Helper to safely add a fact to the dictionary-based KB."""
+    kb.setdefault(fact.name, set()).add(fact)
+
 def generate_boundary_rules(grid_size):
     """
     If A < B, A cannot be the maximum number, and B cannot be 1.
@@ -378,12 +327,12 @@ def load_futoshiki(file_name: str):
 
     # The first line is the grid size N
     N = int(data[0])
-    kb = set()
+    kb = {}
 
     for n in range(1, N + 1):
-        kb.add(Predicate("Row", [Const(n)]))
-        kb.add(Predicate("Col", [Const(n)]))
-        kb.add(Predicate("Num", [Const(n)]))
+        add_fact(kb, Predicate("Row", [Const(n)]))
+        add_fact(kb, Predicate("Col", [Const(n)]))
+        add_fact(kb, Predicate("Num", [Const(n)]))
     
     # --- 2. Parse Grid (Given Clues) ---
     grid_start = 1
@@ -392,17 +341,17 @@ def load_futoshiki(file_name: str):
         row_vals = [int(x.strip()) for x in data[grid_start + i - 1].split(',')]
         for j, val in enumerate(row_vals, start=1):
             if val > 0:
-                kb.add(Predicate("Given", [Const(i), Const(j), Const(val)]))
-
+                add_fact(kb, Predicate("Given", [Const(i), Const(j), Const(val)]))
+    
     # --- 3. Parse Horizontal Constraints (< and >) ---
     horiz_start = grid_start + N
     for i in range(1, N + 1):
         row_vals = [int(x.strip()) for x in data[horiz_start + i - 1].split(',')]
         for j, val in enumerate(row_vals, start=1):
             if val == 1:
-                kb.add(Predicate("LessH", [Const(i), Const(j)]))
+                add_fact(kb, Predicate("LessH", [Const(i), Const(j)]))
             elif val == -1:
-                kb.add(Predicate("GreaterH", [Const(i), Const(j)]))
+                add_fact(kb, Predicate("GreaterH", [Const(i), Const(j)]))
 
     # --- 4. Parse Vertical Constraints (^ and v) ---
     vert_start = horiz_start + N
@@ -410,58 +359,43 @@ def load_futoshiki(file_name: str):
         row_vals = [int(x.strip()) for x in data[vert_start + i - 1].split(',')]
         for j, val in enumerate(row_vals, start=1):
             if val == 1:
-                kb.add(Predicate("LessV", [Const(i), Const(j)]))
+                add_fact(kb, Predicate("LessV", [Const(i), Const(j)]))
             elif val == -1:
-                kb.add(Predicate("GreaterV", [Const(i), Const(j)]))
+                add_fact(kb, Predicate("GreaterV", [Const(i), Const(j)]))
 
-    rules = [*base_rules, *generate_boundary_rules(N), generate_hidden_single_rule(N)]
+    # --- OPTIMIZATION: Rule Ordering ---
+    # 1. Given Clues (Instant deduction)
+    # 2. Boundaries (Instant edge trimming, no deep bindings required)
+    # 3. Sudoku Uniqueness
+    # 4. Inequalities 
+    # 5. Hidden Single (HEAVIEST rule, goes last to benefit from prior pruning)
+    rules = [
+        base_rules[0],                   # Given -> Val
+        *generate_boundary_rules(N),     # Absolute Boundaries
+        base_rules[1],                   # Row Uniqueness
+        base_rules[2],                   # Col Uniqueness
+        *base_rules[3:],                 # Horizontal & Vertical Inequalities
+        generate_hidden_single_rule(N)   # Hidden Single
+    ]
 
     return N, kb, rules
-
-def mainfunc1():
-    # Base Setup: Domains
-    grid_size = 4
-    kb = set()
-    for n in range(1, grid_size + 1):
-        kb.add(Predicate("Row", [Const(n)]))
-        kb.add(Predicate("Col", [Const(n)]))
-        kb.add(Predicate("Num", [Const(n)]))
-
-    # Puzzle Clues (The Cascade Triggers)
-    kb.add(Predicate("Given", [Const(1), Const(1), Const(4)]))
-    kb.add(Predicate("Given", [Const(2), Const(2), Const(3)]))
-    kb.add(Predicate("Given", [Const(3), Const(4), Const(2)]))
-    kb.add(Predicate("Given", [Const(4), Const(2), Const(2)]))
-    
-    # Constraints 
-    kb.add(Predicate("LessH", [Const(2), Const(2)])) # (2,2) < (2,3)
-    kb.add(Predicate("LessH", [Const(4), Const(2)])) # (4,2) < (4,3)
-
-    rules = [*base_rules, generate_hidden_single_rule(grid_size)]
-
-    # Run Engine
-    final_kb = fol_fc(kb, rules)
-    
-    # Print Deductions
-    print("\n--- Summary of Deduced Values ---")
-    vals = sorted([f for f in final_kb if f.name == "Val"], key=lambda x: (x.terms[0].name, x.terms[1].name))
-    for val in vals:
-        print(f"Cell ({val.terms[0]}, {val.terms[1]}) = {val.terms[2]}")
-        
-    print("\n--- Summary of Eliminated Possibilities ---")
-    not_vals = [f for f in final_kb if f.name == "NotVal"]
-    print(f"Total eliminated choices: {len(not_vals)}")
     
 def mainfunc2():
-    n, kb, rules = load_futoshiki("puzzle2.txt")
+    n, kb, rules = load_futoshiki("puzzle.txt")
+    time_start = time.perf_counter()
     final_kb = fol_fc(kb, rules)
-    vals = sorted([f for f in final_kb if f.name == "Val"], key=lambda x: (x.terms[0].name, x.terms[1].name))
+    time_running = time.perf_counter() - time_start
+    val_facts = final_kb.get("Val", set())
+    not_val_facts = final_kb.get("NotVal", set())
+
+    print("\n--- Summary of Deduced Values ---")
+    vals = sorted(list(val_facts), key=lambda x: (x.terms[0].name, x.terms[1].name))
     for val in vals:
         print(f"Cell ({val.terms[0]}, {val.terms[1]}) = {val.terms[2]}")
 
-    print("\n--- Summary of Eliminated Possibilities ---")
-    not_vals = [f for f in final_kb if f.name == "NotVal"]
-    print(f"Total eliminated choices: {len(not_vals)}")
+    print(f"\nTotal time taken: {time_running:.4f} seconds")
+    # print("\n--- Summary of Eliminated Possibilities ---")
+    # print(f"Total eliminated choices: {len(not_val_facts)}")
 
 
 if __name__ == "__main__":

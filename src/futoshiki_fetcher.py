@@ -21,12 +21,12 @@ class FutoshikiFetcher:
     @staticmethod
     def fetch_puzzle(size=4, difficulty=1, game_id=None):
         """
-        Fetch Futoshiki puzzle từ futoshiki.com
+        Fetch Futoshiki puzzle from futoshiki.com
         
         Args:
-            size: Size của puzzle (4-9)
-            difficulty: Độ khó (0-3)
-            game_id: ID của puzzle, nếu None thì random (0-9999)
+            size: Puzzle size (4-9)
+            difficulty: Difficulty level (0-3)
+            game_id: Puzzle ID, if None then random (0-9999)
             
         Returns:
             dict: {size, board, answer, constraints}
@@ -47,18 +47,18 @@ class FutoshikiFetcher:
             # Parse XML
             root = ET.fromstring(response.content)
             
-            # Lấy dữ liệu game - có thể root là <game> hoặc root có chứa <game>
+            # Get game data - root may be <game> or contain <game>
             if root.tag == 'game':
                 game_data = root.text
             else:
                 game_element = root.find('game')
                 if game_element is None:
-                    print(f"Lỗi: Không tìm thấy tag 'game'")
+                    print(f"Error: Could not find 'game' tag")
                     return None
                 game_data = game_element.text
             
             if game_data is None:
-                print(f"Lỗi: Tag 'game' rỗng")
+                print(f"Error: 'game' tag is empty")
                 return None
             
             # Parse game data
@@ -71,37 +71,37 @@ class FutoshikiFetcher:
                 "constraints": constraints
             }
         except ET.ParseError as e:
-            print(f"Lỗi parse XML: {e}")
+            print(f"Error parsing XML: {e}")
             print(f"Response: {response.text}")
             return None
         except Exception as e:
-            print(f"Lỗi khi fetch puzzle: {e}")
+            print(f"Error fetching puzzle: {e}")
             return None
     
     @staticmethod
     def parse_game_data(game_str, size):
         """
-        Parse game string từ XML
+        Parse game string from XML.
         
-        Format mỗi dòng có độ rộng 2*size-1 ký tự.
-        Dòng chẵn (0,2,4,...) trong phần board: cells + horizontal constraints
-        Dòng lẻ (1,3,5,...) trong phần board: vertical constraints
+        Each line has width 2*size-1 characters.
+        Even rows (0,2,4,...) in board: cells + horizontal constraints
+        Odd rows (1,3,5,...) in board: vertical constraints
         
         Args:
-            game_str: Chuỗi dữ liệu game
-            size: Kích thước board (4-9)
+            game_str: Game data string
+            size: Board size (4-9)
             
         Returns:
             tuple: (board, answer, constraints)
         """
         line_width = 2 * size - 1
 
-        # Tách thành các dòng theo đúng độ rộng của board
+        # Split into lines by board width
         lines = []
         for i in range(0, len(game_str), line_width):
             lines.append(game_str[i:i + line_width])
         
-        # Board và answer đều có 2*size-1 dòng
+        # Board and answer both have 2*size-1 lines
         total_board_lines = line_width
         board_lines = lines[:total_board_lines]
         answer_lines = lines[total_board_lines:total_board_lines * 2]
