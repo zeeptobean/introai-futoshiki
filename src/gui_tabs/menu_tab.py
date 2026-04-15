@@ -17,6 +17,7 @@ class MenuTabMixin:
         try:
             self.puzzle = load_puzzle_from_file(self.input_files[self.input_index])
             self.display_board = self.puzzle.clone_board()
+            self.play_board = self.puzzle.clone_board()
             self.menu_board = self.puzzle.clone_board()
             self.menu_constraints = list(self.puzzle.constraints)
             self.solution_cache = None
@@ -39,6 +40,7 @@ class MenuTabMixin:
             return
         self.puzzle = PuzzleSpec(size=size, board=[[0] * size for _ in range(size)], constraints=[])
         self.display_board = self.puzzle.clone_board()
+        self.play_board = self.puzzle.clone_board()
         self.menu_board = self.puzzle.clone_board()
         self.menu_constraints = []
         self.solution_cache = None
@@ -84,6 +86,7 @@ class MenuTabMixin:
         self.puzzle.board = [row[:] for row in self.menu_board]
         self.puzzle.constraints = list(self.menu_constraints)
         self.display_board = self.puzzle.clone_board()
+        self.play_board = self.puzzle.clone_board()
 
         self.initial_board = self.puzzle.clone_board()
         self.initial_constraints = list(self.puzzle.constraints)

@@ -42,6 +42,9 @@ ALGO_OPTIONS = [
 
 SPEED_MIN = 0.25
 SPEED_MAX = 20.0
+DROPDOWN_MAX_HEIGHT = 220
+DROPDOWN_LIST_PADDING = 4
+DROPDOWN_SCROLL_STEP = 28
 
 
 @dataclass
@@ -83,6 +86,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
 
         self.puzzle: PuzzleSpec = self._load_initial_puzzle()
         self.display_board = self.puzzle.clone_board()
+        self.play_board = self.puzzle.clone_board()
         self.menu_board = self.puzzle.clone_board()
         self.menu_constraints = list(self.puzzle.constraints)
         self.solution_cache: Optional[List[List[int]]] = None
@@ -100,7 +104,10 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         self.selected_algo_idx = 0
         self.algo_dropdown_open = False
         self.input_dropdown_open = False
+        self.algo_dropdown_scroll = 0
+        self.input_dropdown_scroll = 0
         self.selected_cell: Optional[Tuple[int, int]] = None
+        self.show_status_panel = False
 
         self.trace_events = []
         self.trace_solver_key: Optional[Tuple[str, str]] = None
@@ -202,6 +209,11 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         return True
 
     def _handle_keydown(self, event: pygame.event.Event) -> None:
+        if event.key == pygame.K_i:
+            self.show_status_panel = not self.show_status_panel
+            self.status_text = "Info panel {}.".format("shown" if self.show_status_panel else "hidden")
+            return
+
         if event.key == pygame.K_TAB:
             idx = SCENES.index(self.scene)
             self.scene = SCENES[(idx + 1) % len(SCENES)]
@@ -253,7 +265,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         elif self.scene == "SOLVE":
             board = self.display_board
         else:  # PLAY
-            board = self.puzzle.board
+            board = self.play_board
 
         prev = board[r][c]
         if prev == value:
@@ -274,13 +286,18 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
 
         # Update error cells for PLAY validation
         if self.scene == "PLAY":
-            self.error_cells = self._collect_invalid_cells(self.puzzle.board)
+            self.error_cells = self._collect_invalid_cells(self.play_board)
             self._update_play_completed_state()
 
     def _handle_mouse(self, event: pygame.event.Event) -> None:
         pos = event.pos
         w, h = self.screen.get_size()
         layout = self._layout(w, h)
+
+        if event.button in (4, 5):
+            if self._handle_dropdown_wheel(event.button, pos, layout):
+                return
+            return
 
         for i, tab in enumerate(layout["tabs"]):
             if tab.hit(pos):
@@ -356,7 +373,10 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         elif label == "Save":
             self._save_menu_state()
         elif label == "Show Answer":
-            self._show_answer_action()
+            if self.scene == "PLAY":
+                self._solution_action()
+            else:
+                self._show_answer_action()
         elif label == "Load Selected Input":
             self._load_selected_input()
         elif label == "Save To Inputs/temp-gui.txt":
@@ -367,32 +387,40 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             self._hint_action()
         elif label == "Check":
             self._check_action()
-        elif label == "Solution":
-            self._solution_action()
+        elif label == "Toggle Info":
+            self.show_status_panel = not self.show_status_panel
+            self.status_text = "Info panel {}.".format("shown" if self.show_status_panel else "hidden")
 
     def _handle_algo_dropdown_click(self, pos: Tuple[int, int], layout: dict) -> bool:
         if self.scene == "MENU":
             return False
 
         main_rect = layout["algo_dropdown"]["main"]
-        option_rects = layout["algo_dropdown"]["options"]
+        dropdown = layout["algo_dropdown"]
 
         if main_rect.collidepoint(pos):
             self.algo_dropdown_open = not self.algo_dropdown_open
             if self.algo_dropdown_open:
                 self.input_dropdown_open = False
+                self.algo_dropdown_scroll = 0
             return True
 
         if not self.algo_dropdown_open:
             return False
 
-        for i, rect in enumerate(option_rects):
-            if rect.collidepoint(pos):
-                self.selected_algo_idx = i
-                self.algo_dropdown_open = False
-                self.input_dropdown_open = False
-                self.status_text = "Algorithm selected: {}".format(self.selected_algo_label)
-                return True
+        if self._handle_dropdown_scrollbar_click(pos, dropdown, "algo"):
+            return True
+
+        idx = self._dropdown_item_index_from_pos(pos, dropdown, self.algo_dropdown_scroll)
+        if idx is not None and idx < len(ALGO_OPTIONS):
+            self.selected_algo_idx = idx
+            self.algo_dropdown_open = False
+            self.input_dropdown_open = False
+            self.status_text = "Algorithm selected: {}".format(self.selected_algo_label)
+            return True
+
+        if dropdown["list_rect"].collidepoint(pos):
+            return True
 
         self.algo_dropdown_open = False
         return False
@@ -402,24 +430,31 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             return False
 
         main_rect = layout["input_dropdown"]["main"]
-        option_rects = layout["input_dropdown"]["options"]
+        dropdown = layout["input_dropdown"]
 
         if main_rect.collidepoint(pos):
             self.input_dropdown_open = not self.input_dropdown_open
             if self.input_dropdown_open:
                 self.algo_dropdown_open = False
+                self.input_dropdown_scroll = 0
             return True
 
         if not self.input_dropdown_open:
             return False
 
-        for i, rect in enumerate(option_rects):
-            if rect.collidepoint(pos):
-                self.input_index = i
-                self.input_dropdown_open = False
-                self.algo_dropdown_open = False
-                self.status_text = "Input selected: {}".format(self.selected_input_label)
-                return True
+        if self._handle_dropdown_scrollbar_click(pos, dropdown, "input"):
+            return True
+
+        idx = self._dropdown_item_index_from_pos(pos, dropdown, self.input_dropdown_scroll)
+        if idx is not None and idx < len(self.input_files):
+            self.input_index = idx
+            self.input_dropdown_open = False
+            self.algo_dropdown_open = False
+            self.status_text = "Input selected: {}".format(self.selected_input_label)
+            return True
+
+        if dropdown["list_rect"].collidepoint(pos):
+            return True
 
         self.input_dropdown_open = False
         return False
@@ -499,9 +534,10 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                         self.status_text = "Solver error: {}".format(result.message)
 
     def _clone_puzzle(self) -> PuzzleSpec:
+        board = self.play_board if self.scene == "PLAY" else self.puzzle.board
         return PuzzleSpec(
             size=self.puzzle.size,
-            board=self.puzzle.clone_board(),
+            board=[row[:] for row in board],
             constraints=list(self.puzzle.constraints),
         )
 
@@ -520,33 +556,55 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
 
         btns = []
         dropdown_main = None
-        dropdown_options = []
+        dropdown_data = None
 
-        input_top = panel_rect.top + 20
+        def build_dropdown(main_rect: pygame.Rect, item_labels: List[str], row_h: int, row_gap: int, kind: str) -> dict:
+            list_top = main_rect.bottom + 8
+            content_h = len(item_labels) * row_h + max(0, len(item_labels) - 1) * row_gap
+            panel_safe_bottom = panel_rect.bottom - 44
+            max_h_by_panel = max(0, panel_safe_bottom - list_top)
+            visible_h = min(content_h, min(DROPDOWN_MAX_HEIGHT, max_h_by_panel))
+            list_rect = pygame.Rect(main_rect.left, list_top, main_rect.width, visible_h)
+            return {
+                "main": main_rect,
+                "items": item_labels,
+                "row_h": row_h,
+                "row_gap": row_gap,
+                "list_rect": list_rect,
+                "content_h": content_h,
+                "kind": kind,
+            }
+
+        input_top = panel_rect.top + 30
         if self.scene != "MENU":
-            dropdown_main = pygame.Rect(panel_rect.left + 10, panel_rect.top + 20, panel_rect.width - 20, 36)
-            for i in range(len(ALGO_OPTIONS)):
-                dropdown_options.append(
-                    pygame.Rect(dropdown_main.left, dropdown_main.bottom + i * 34, dropdown_main.width, 32)
-                )
-            input_top = dropdown_main.bottom + 22
+            dropdown_main = pygame.Rect(panel_rect.left + 10, panel_rect.top + 30, panel_rect.width - 20, 36)
+            dropdown_data = build_dropdown(
+                dropdown_main,
+                [opt["label"] for opt in ALGO_OPTIONS],
+                row_h=32,
+                row_gap=2,
+                kind="algo",
+            )
+            input_top = dropdown_main.bottom + 32
 
         input_main = pygame.Rect(panel_rect.left + 10, input_top, panel_rect.width - 20, 36)
-        input_options = []
-        for i in range(len(self.input_files)):
-            input_options.append(
-                pygame.Rect(input_main.left, input_main.bottom + i * 30, input_main.width, 28)
-            )
+        input_data = build_dropdown(
+            input_main,
+            [os.path.basename(path) for path in self.input_files],
+            row_h=28,
+            row_gap=2,
+            kind="input",
+        )
 
         size_buttons = []
-        size_y = input_main.bottom + 20
+        size_y = input_main.bottom + 32
         size_w = (panel_rect.width - 20 - 4 * 6) // 5
         if self.scene == "MENU":
             for i, size in enumerate(SIZE_OPTIONS):
                 bx = panel_rect.left + 10 + i * (size_w + 6)
                 size_buttons.append(Button("{}x{}".format(size, size), pygame.Rect(bx, size_y, size_w, 30)))
 
-        y = size_y + 46 if self.scene == "MENU" else dropdown_main.bottom + 24
+        y = size_y + 54 if self.scene == "MENU" else dropdown_main.bottom + 32
         if self.scene == "SOLVE":
             button_labels = [
                 "Play",
@@ -554,14 +612,15 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                 "Step",
                 "Reset",
                 "Show Answer",
+                "Toggle Info",
             ]
         elif self.scene == "PLAY":
             button_labels = [
                 "Undo Move",
                 "Hint",
-                "Check",
-                "Solution",
+                "Show Answer",
                 "Reset",
+                "Toggle Info",
             ]
         else:
             button_labels = [
@@ -569,6 +628,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                 "Save",
                 "Save To Inputs/temp-gui.txt",
                 "Reset",
+                "Toggle Info",
             ]
 
         for label in button_labels:
@@ -577,7 +637,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
 
         speed_slider = None
         if self.scene == "SOLVE":
-            track = pygame.Rect(panel_rect.left + 16, y + 8, panel_rect.width - 32, 8)
+            track = pygame.Rect(panel_rect.left + 16, y + 34, panel_rect.width - 32, 8)
             value_ratio = (self.animation_speed - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)
             value_ratio = max(0.0, min(1.0, value_ratio))
             thumb_x = int(track.left + value_ratio * track.width)
@@ -589,14 +649,8 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             "panel_rect": panel_rect,
             "tabs": tabs,
             "buttons": btns,
-            "algo_dropdown": {
-                "main": dropdown_main,
-                "options": dropdown_options,
-            },
-            "input_dropdown": {
-                "main": input_main,
-                "options": input_options,
-            },
+            "algo_dropdown": dropdown_data,
+            "input_dropdown": input_data,
             "size_buttons": size_buttons,
             "speed_slider": speed_slider,
             "header_h": header_h,
@@ -630,7 +684,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         elif self.scene == "MENU":
             render_board = self.menu_board
         else:  # PLAY
-            render_board = self.puzzle.board
+            render_board = self.play_board
         
         board_for_validation = render_board
         invalid_cells = self._collect_invalid_cells(board_for_validation)
@@ -784,7 +838,8 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         pygame.draw.rect(self.screen, (233, 236, 240), panel_rect)
         pygame.draw.rect(self.screen, (173, 179, 188), panel_rect, 1)
 
-        title = self.font_ui.render("Control Panel", True, (42, 52, 66))
+        # title = self.font_ui.render("Control Panel", True, (42, 52, 66))
+        title = self.font_ui.render("", True, (42, 52, 66))
         self.screen.blit(title, (panel_rect.left + 10, panel_rect.top - 28))
 
         # Draw main dropdown field first.
@@ -796,7 +851,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         if self.scene == "MENU":
             size_title = self.font_small.render("Board Size", True, (57, 66, 80))
             if layout["size_buttons"]:
-                self.screen.blit(size_title, (layout["size_buttons"][0].rect.left, layout["size_buttons"][0].rect.top - 18))
+                self.screen.blit(size_title, (layout["size_buttons"][0].rect.left, layout["size_buttons"][0].rect.top - 24))
             for size_btn in layout["size_buttons"]:
                 size_btn.draw(
                     self.screen,
@@ -807,51 +862,46 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         for button in buttons:
             button.draw(self.screen, self.font_small, active=False)
 
-        # Draw dropdown options last to ensure they overlay controls below.
-        if self.scene != "MENU":
-            self._draw_algo_dropdown(layout, overlay_only=True)
-        if self.scene == "MENU":
-            self._draw_input_dropdown(layout, overlay_only=True)
-
         if self.scene == "SOLVE" and layout.get("speed_slider") is not None:
             slider = layout["speed_slider"]
             label = self.font_small.render("Speed {:.2f}x".format(self.animation_speed), True, (52, 60, 74))
-            self.screen.blit(label, (slider["track"].left, slider["track"].top - 24))
+            self.screen.blit(label, (slider["track"].left, slider["track"].top - 30))
             pygame.draw.rect(self.screen, (190, 197, 208), slider["track"], border_radius=4)
             pygame.draw.rect(self.screen, (84, 122, 188), slider["thumb"], border_radius=8)
             pygame.draw.rect(self.screen, (62, 98, 156), slider["thumb"], 1, border_radius=8)
 
-        y = panel_rect.bottom - 172
-        status_lines = self._wrap_text(
-            "Status: {}".format(self.status_text),
-            panel_rect.width - 24,
-            self.font_small,
-        )
-        lines = [
-            "Scene: {}".format(self.scene),
-            "Worker: {}".format(self.worker_state),
-            "Algorithm: {}".format(self.selected_algo_label),
-            "Solver: {}".format(self.selected_solver.value),
-            "Heuristic: {}".format(self.selected_heuristic),
-            "Animation: {:.2f}x".format(self.animation_speed),
-            "Trace: {}/{}".format(self.trace_cursor, len(self.trace_events)),
-        ]
-        if self.latest_result is not None:
-            lines.append("Result: {}".format(self.latest_result.status.value))
-        lines.extend(status_lines)
-        for line in lines:
-            text = self.font_small.render(line, True, (52, 60, 74))
-            self.screen.blit(text, (panel_rect.left + 12, y))
-            y += 22
-
-        if self.scene == "MENU":
-            tip = "Menu tip: click size buttons, then click gap slots between cells to edit constraints."
-        elif self.scene == "PLAY":
-            tip = "Play tip: use Hint for one cell, Check for violations, Solution to fill the full board."
+        y = panel_rect.bottom - 240
+        if self.show_status_panel:
+            status_lines = self._wrap_text(
+                "Status: {}".format(self.status_text),
+                panel_rect.width - 24,
+                self.font_small,
+            )
+            lines = [
+                "Scene: {}".format(self.scene),
+                "Worker: {}".format(self.worker_state),
+                "Algorithm: {}".format(self.selected_algo_label),
+                "Solver: {}".format(self.selected_solver.value),
+                "Heuristic: {}".format(self.selected_heuristic),
+                "Animation: {:.2f}x".format(self.animation_speed),
+                "Trace: {}/{}".format(self.trace_cursor, len(self.trace_events)),
+            ]
+            if self.latest_result is not None:
+                lines.append("Result: {}".format(self.latest_result.status.value))
+            lines.extend(status_lines)
+            for line in lines:
+                text = self.font_small.render(line, True, (52, 60, 74))
+                self.screen.blit(text, (panel_rect.left + 12, y))
+                y += 22
         else:
-            tip = "Solve tip: Play starts solver, Pause/Step control trace, Reset clears current solve view."
-        tip_text = self.font_small.render(tip, True, (78, 86, 98))
-        self.screen.blit(tip_text, (panel_rect.left + 12, panel_rect.bottom - 24))
+            text = self.font_small.render("", True, (52, 60, 74))
+            self.screen.blit(text, (panel_rect.left + 12, y))
+
+        # Draw dropdown overlays last so they are not covered by status/tips.
+        if self.scene != "MENU":
+            self._draw_algo_dropdown(layout, overlay_only=True)
+        if self.scene == "MENU":
+            self._draw_input_dropdown(layout, overlay_only=True)
 
     def _collect_invalid_cells(self, board: List[List[int]]) -> set:
         return self._cells_from_issues(self._analyze_board_issues(board))
@@ -930,15 +980,17 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         if self.scene == "MENU":
             return
 
-        main = layout["algo_dropdown"]["main"]
-        options = layout["algo_dropdown"]["options"]
+        dropdown = layout.get("algo_dropdown")
+        if dropdown is None:
+            return
+        main = dropdown["main"]
 
         if not overlay_only:
             pygame.draw.rect(self.screen, (248, 250, 253), main, border_radius=6)
             pygame.draw.rect(self.screen, (138, 146, 158), main, 1, border_radius=6)
 
             header = self.font_small.render("Algorithm", True, (57, 66, 80))
-            self.screen.blit(header, (main.left, main.top - 18))
+            self.screen.blit(header, (main.left, main.top - 24))
 
             value = self.font_small.render(self.selected_algo_label, True, (42, 52, 66))
             self.screen.blit(value, (main.left + 8, main.top + 8))
@@ -951,25 +1003,21 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         if not self.algo_dropdown_open:
             return
 
-        for i, rect in enumerate(options):
-            is_selected = i == self.selected_algo_idx
-            bg = (214, 228, 252) if is_selected else (248, 250, 253)
-            fg = (34, 43, 59)
-            pygame.draw.rect(self.screen, bg, rect, border_radius=4)
-            pygame.draw.rect(self.screen, (138, 146, 158), rect, 1, border_radius=4)
-            label = self.font_small.render(ALGO_OPTIONS[i]["label"], True, fg)
-            self.screen.blit(label, (rect.left + 8, rect.top + 6))
+        self.algo_dropdown_scroll = self._clamp_dropdown_scroll(self.algo_dropdown_scroll, dropdown)
+        self._draw_dropdown_overlay(dropdown, self.algo_dropdown_scroll, self.selected_algo_idx)
 
     def _draw_input_dropdown(self, layout: dict, overlay_only: bool) -> None:
-        main = layout["input_dropdown"]["main"]
-        options = layout["input_dropdown"]["options"]
+        dropdown = layout.get("input_dropdown")
+        if dropdown is None:
+            return
+        main = dropdown["main"]
 
         if not overlay_only:
             pygame.draw.rect(self.screen, (248, 250, 253), main, border_radius=6)
             pygame.draw.rect(self.screen, (138, 146, 158), main, 1, border_radius=6)
 
             header = self.font_small.render("Input File", True, (57, 66, 80))
-            self.screen.blit(header, (main.left, main.top - 18))
+            self.screen.blit(header, (main.left, main.top - 24))
 
             value = self.font_small.render(self.selected_input_label, True, (42, 52, 66))
             self.screen.blit(value, (main.left + 8, main.top + 8))
@@ -982,17 +1030,162 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         if not self.input_dropdown_open:
             return
 
-        if not options:
+        if not dropdown["items"]:
             return
 
-        for i, rect in enumerate(options):
-            is_selected = i == self.input_index
+        self.input_dropdown_scroll = self._clamp_dropdown_scroll(self.input_dropdown_scroll, dropdown)
+        self._draw_dropdown_overlay(dropdown, self.input_dropdown_scroll, self.input_index)
+
+    @staticmethod
+    def _dropdown_inner_rect(dropdown: dict) -> pygame.Rect:
+        inner = dropdown["list_rect"].inflate(-2 * DROPDOWN_LIST_PADDING, -2 * DROPDOWN_LIST_PADDING)
+        if inner.width < 1:
+            inner.width = 1
+        if inner.height < 1:
+            inner.height = 1
+        return inner
+
+    def _dropdown_max_scroll(self, dropdown: dict) -> int:
+        inner_h = self._dropdown_inner_rect(dropdown).height
+        return max(0, dropdown["content_h"] - inner_h)
+
+    def _clamp_dropdown_scroll(self, value: int, dropdown: dict) -> int:
+        return max(0, min(self._dropdown_max_scroll(dropdown), int(value)))
+
+    def _dropdown_needs_scrollbar(self, dropdown: dict) -> bool:
+        return self._dropdown_max_scroll(dropdown) > 0
+
+    def _dropdown_scrollbar_rects(self, dropdown: dict) -> Tuple[pygame.Rect, pygame.Rect]:
+        list_rect = dropdown["list_rect"]
+        track = pygame.Rect(list_rect.right - 12, list_rect.top + 6, 8, max(1, list_rect.height - 12))
+
+        max_scroll = self._dropdown_max_scroll(dropdown)
+        if max_scroll <= 0:
+            thumb = pygame.Rect(track.left, track.top, track.width, track.height)
+            return track, thumb
+
+        inner_h = self._dropdown_inner_rect(dropdown).height
+        thumb_h = max(22, int(track.height * (inner_h / float(max(1, dropdown["content_h"])))))
+        thumb_h = min(track.height, thumb_h)
+
+        if track.height == thumb_h:
+            thumb_top = track.top
+        else:
+            ratio = float(self.algo_dropdown_scroll if dropdown.get("kind") == "algo" else self.input_dropdown_scroll) / float(max_scroll)
+            thumb_top = track.top + int(ratio * (track.height - thumb_h))
+
+        thumb = pygame.Rect(track.left, thumb_top, track.width, thumb_h)
+        return track, thumb
+
+    def _draw_dropdown_overlay(self, dropdown: dict, scroll_value: int, selected_idx: int) -> None:
+        list_rect = dropdown["list_rect"]
+        if list_rect.height <= 0:
+            return
+
+        items = dropdown["items"]
+        row_h = dropdown["row_h"]
+        row_gap = dropdown["row_gap"]
+
+        pygame.draw.rect(self.screen, (246, 249, 253), list_rect, border_radius=6)
+        pygame.draw.rect(self.screen, (138, 146, 158), list_rect, 1, border_radius=6)
+
+        needs_scrollbar = self._dropdown_needs_scrollbar(dropdown)
+        inner = self._dropdown_inner_rect(dropdown)
+        if needs_scrollbar:
+            inner.width = max(1, inner.width - 12)
+
+        prev_clip = self.screen.get_clip()
+        self.screen.set_clip(inner)
+
+        step = row_h + row_gap
+        for i, label_text in enumerate(items):
+            item_top = inner.top - scroll_value + i * step
+            row_rect = pygame.Rect(inner.left, item_top, inner.width, row_h)
+            if row_rect.bottom < inner.top or row_rect.top > inner.bottom:
+                continue
+
+            is_selected = i == selected_idx
             bg = (214, 228, 252) if is_selected else (248, 250, 253)
             fg = (34, 43, 59)
-            pygame.draw.rect(self.screen, bg, rect, border_radius=4)
-            pygame.draw.rect(self.screen, (138, 146, 158), rect, 1, border_radius=4)
-            label = self.font_small.render(os.path.basename(self.input_files[i]), True, fg)
-            self.screen.blit(label, (rect.left + 8, rect.top + 5))
+            pygame.draw.rect(self.screen, bg, row_rect, border_radius=4)
+            pygame.draw.rect(self.screen, (138, 146, 158), row_rect, 1, border_radius=4)
+            label = self.font_small.render(label_text, True, fg)
+            self.screen.blit(label, (row_rect.left + 8, row_rect.top + 5))
+
+        self.screen.set_clip(prev_clip)
+
+        if needs_scrollbar:
+            track, thumb = self._dropdown_scrollbar_rects(dropdown)
+            pygame.draw.rect(self.screen, (224, 229, 236), track, border_radius=5)
+            pygame.draw.rect(self.screen, (183, 191, 203), track, 1, border_radius=5)
+            pygame.draw.rect(self.screen, (137, 149, 168), thumb, border_radius=5)
+
+    def _dropdown_item_index_from_pos(self, pos: Tuple[int, int], dropdown: dict, scroll_value: int) -> Optional[int]:
+        list_rect = dropdown["list_rect"]
+        if list_rect.height <= 0:
+            return None
+
+        inner = self._dropdown_inner_rect(dropdown)
+        if self._dropdown_needs_scrollbar(dropdown):
+            inner.width = max(1, inner.width - 12)
+
+        if not inner.collidepoint(pos):
+            return None
+
+        row_h = dropdown["row_h"]
+        row_gap = dropdown["row_gap"]
+        step = row_h + row_gap
+        rel = pos[1] - inner.top + scroll_value
+        if rel < 0:
+            return None
+
+        idx = int(rel // step)
+        if idx < 0 or idx >= len(dropdown["items"]):
+            return None
+
+        if (rel % step) >= row_h:
+            return None
+
+        return idx
+
+    def _handle_dropdown_scrollbar_click(self, pos: Tuple[int, int], dropdown: dict, kind: str) -> bool:
+        if not self._dropdown_needs_scrollbar(dropdown):
+            return False
+
+        track, _thumb = self._dropdown_scrollbar_rects(dropdown)
+        if not track.collidepoint(pos):
+            return False
+
+        max_scroll = self._dropdown_max_scroll(dropdown)
+        if max_scroll <= 0:
+            return True
+
+        ratio = (pos[1] - track.top) / float(max(1, track.height))
+        ratio = max(0.0, min(1.0, ratio))
+        new_scroll = int(ratio * max_scroll)
+
+        if kind == "algo":
+            self.algo_dropdown_scroll = self._clamp_dropdown_scroll(new_scroll, dropdown)
+        else:
+            self.input_dropdown_scroll = self._clamp_dropdown_scroll(new_scroll, dropdown)
+        return True
+
+    def _handle_dropdown_wheel(self, button: int, pos: Tuple[int, int], layout: dict) -> bool:
+        delta = -DROPDOWN_SCROLL_STEP if button == 4 else DROPDOWN_SCROLL_STEP
+
+        if self.algo_dropdown_open and self.scene != "MENU":
+            dropdown = layout.get("algo_dropdown")
+            if dropdown is not None and dropdown["list_rect"].collidepoint(pos):
+                self.algo_dropdown_scroll = self._clamp_dropdown_scroll(self.algo_dropdown_scroll + delta, dropdown)
+                return True
+
+        if self.input_dropdown_open and self.scene == "MENU":
+            dropdown = layout.get("input_dropdown")
+            if dropdown is not None and dropdown["list_rect"].collidepoint(pos):
+                self.input_dropdown_scroll = self._clamp_dropdown_scroll(self.input_dropdown_scroll + delta, dropdown)
+                return True
+
+        return False
 
     @staticmethod
     def _board_geometry(board_rect: pygame.Rect, n: int) -> dict:

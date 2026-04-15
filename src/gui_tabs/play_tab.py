@@ -15,7 +15,7 @@ class PlayTabMixin:
         if target is None:
             for r in range(self.puzzle.size):
                 for c in range(self.puzzle.size):
-                    if self.puzzle.board[r][c] != self.solution_cache[r][c]:
+                    if self.play_board[r][c] != self.solution_cache[r][c]:
                         target = (r, c)
                         break
                 if target is not None:
@@ -39,8 +39,8 @@ class PlayTabMixin:
         self._apply_solution_cache()
 
     def _on_play_tab_enter(self) -> None:
-        issues = self._analyze_board_issues(self.puzzle.board)
-        has_empty = any(0 in row for row in self.puzzle.board)
+        issues = self._analyze_board_issues(self.play_board)
+        has_empty = any(0 in row for row in self.play_board)
         if (not issues) and (not has_empty):
             return
 
@@ -68,19 +68,17 @@ class PlayTabMixin:
     def _apply_solution_cache(self) -> None:
         if self.solution_cache is None:
             return
-        self.puzzle.board = [row[:] for row in self.solution_cache]
-        if self.scene in ("PLAY", "MENU"):
-            self.display_board = self.puzzle.clone_board()
+        self.play_board = [row[:] for row in self.solution_cache]
         self.undo_stack = []
         self.error_cells = set()
         self._update_play_completed_state()
         self.status_text = "Solution applied to board."
 
     def _check_action(self) -> None:
-        issues = self._analyze_board_issues(self.puzzle.board)
+        issues = self._analyze_board_issues(self.play_board)
         self.error_cells = self._cells_from_issues(issues)
 
-        has_empty = any(0 in row for row in self.puzzle.board)
+        has_empty = any(0 in row for row in self.play_board)
         if not issues and not has_empty:
             self.play_completed = True
             self.status_text = "Check: correct solution."
@@ -104,16 +102,16 @@ class PlayTabMixin:
         elif self.scene == "SOLVE":
             self.display_board[r][c] = prev
         else:  # PLAY
-            self.puzzle.board[r][c] = prev
+            self.play_board[r][c] = prev
 
         if self.scene == "PLAY":
-            self.error_cells = self._collect_invalid_cells(self.puzzle.board)
+            self.error_cells = self._collect_invalid_cells(self.play_board)
             self._update_play_completed_state()
         self.status_text = "Undo: reverted cell ({}, {}).".format(r + 1, c + 1)
 
     def _reset_play_view(self) -> None:
         """Reset PLAY display board to initial without affecting puzzle state."""
-        self.puzzle.board = [row[:] for row in self.initial_board]
+        self.play_board = [row[:] for row in self.initial_board]
         self.undo_stack = []
         self.error_cells = set()
         self.selected_cell = None
@@ -121,8 +119,8 @@ class PlayTabMixin:
         self.status_text = "PLAY display reset to initial board."
 
     def _update_play_completed_state(self) -> None:
-        issues = self._analyze_board_issues(self.puzzle.board)
-        has_empty = any(0 in row for row in self.puzzle.board)
+        issues = self._analyze_board_issues(self.play_board)
+        has_empty = any(0 in row for row in self.play_board)
         self.play_completed = (not issues) and (not has_empty)
         if self.play_completed:
             self.status_text = "Play solved."
