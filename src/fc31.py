@@ -1,7 +1,10 @@
 # forward chaining FOL, with optimizations
 import time
 
-from src.myfol import *
+try:
+    from myfol import *
+except ImportError:  # pragma: no cover
+    from src.myfol import *
 
 def substitute(theta, predicate):
     new_terms = []
@@ -19,7 +22,9 @@ def substitute(theta, predicate):
 # 3. Forward Chaining Engine
 # ==========================================
 
-def match_premises(premises, kb, theta):
+def match_premises(premises, kb, theta, should_cancel=None):
+    if should_cancel is not None and should_cancel():
+        raise RuntimeError("Solve cancelled")
     if not premises:
         yield theta
         return
@@ -39,28 +44,34 @@ def match_premises(premises, kb, theta):
         if all(isinstance(t, Const) for t in bound_terms):
             raw_values = [t.name for t in bound_terms]
             if first_premise.func(*raw_values):
-                yield from match_premises(rest_premises, kb, theta)
+                yield from match_premises(rest_premises, kb, theta, should_cancel=should_cancel)
         return 
 
     # --- OPTIMIZATION: Hash Map Lookup ---
     # Only try to unify with facts that share the exact same predicate name.
     # If looking for a "Val", only loop through known "Val" facts!
     for fact in kb.get(first_premise.name, set()):
+        if should_cancel is not None and should_cancel():
+            raise RuntimeError("Solve cancelled")
         theta_new = unify(first_premise, fact, theta.copy())
         if theta_new is not None:
-            yield from match_premises(rest_premises, kb, theta_new)
+            yield from match_premises(rest_premises, kb, theta_new, should_cancel=should_cancel)
 
-def fol_fc(kb, rules):
+def fol_fc(kb, rules, should_cancel=None):
     # print("\n--- Starting Forward Chaining ---")
     new_facts_found = True
     iteration = 1
     
     while new_facts_found:
+        if should_cancel is not None and should_cancel():
+            raise RuntimeError("Solve cancelled")
         new_facts_found = False
         # print(f"Iteration {iteration} running...")
         
         for rule in rules:
-            for theta in match_premises(rule.premises, kb, {}):
+            if should_cancel is not None and should_cancel():
+                raise RuntimeError("Solve cancelled")
+            for theta in match_premises(rule.premises, kb, {}, should_cancel=should_cancel):
                 q_prime = substitute(theta, rule.conclusion)
                 
                 # --- OPTIMIZATION: Dictionary Insertion ---
@@ -381,7 +392,8 @@ def load_futoshiki(file_name: str):
     return N, kb, rules
     
 def mainfunc2():
-    n, kb, rules = load_futoshiki("puzzle.txt")
+    n, kb, rules = load_futoshiki("Inputs/input-10.txt")
+    print(f"Loaded Futoshiki puzzle of size {n}x{n} with {sum(len(v) for v in kb.values())} initial facts.")
     time_start = time.perf_counter()
     final_kb = fol_fc(kb, rules)
     time_running = time.perf_counter() - time_start

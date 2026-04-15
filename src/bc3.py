@@ -3,7 +3,10 @@ from typing import TypeAlias, TypeVar
 from collections.abc import Iterator
 import time
 
-from src.myfol import *
+try:
+    from myfol import *
+except ImportError:  # pragma: no cover
+    from src.myfol import *
 
 def subst(theta: Theta, x):
     if isinstance(x, Var):
@@ -41,15 +44,21 @@ def standardize_variables(rule: Rule) -> Rule:
 # 3. Backward Chaining Algorithm
 # ==========================================
 
-def fol_bc_or(kb: list[Rule], goal, theta: Theta) -> Iterator[Theta]:
+def fol_bc_or(kb: list[Rule], goal, theta: Theta, should_cancel=None) -> Iterator[Theta]:
+    if should_cancel is not None and should_cancel():
+        raise RuntimeError("Solve cancelled")
     for rule in kb:
+        if should_cancel is not None and should_cancel():
+            raise RuntimeError("Solve cancelled")
         rule_std = standardize_variables(rule)
         theta_prime = unify(rule_std.conclusion, goal, theta)
         if theta_prime is not None:
-            for next_theta in fol_bc_and(kb, rule_std.premises, theta_prime):
+            for next_theta in fol_bc_and(kb, rule_std.premises, theta_prime, should_cancel=should_cancel):
                 yield next_theta
 
-def fol_bc_and(kb: list[Rule], goals: list[Predicate], theta: Theta | None) -> Iterator[Theta]:
+def fol_bc_and(kb: list[Rule], goals: list[Predicate], theta: Theta | None, should_cancel=None) -> Iterator[Theta]:
+    if should_cancel is not None and should_cancel():
+        raise RuntimeError("Solve cancelled")
     if theta is None: return
     elif len(goals) == 0: yield theta
     else:
@@ -61,12 +70,12 @@ def fol_bc_and(kb: list[Rule], goals: list[Predicate], theta: Theta | None) -> I
             if all(isinstance(t, Const) for t in first_subst.terms):
                 args = [t.name for t in first_subst.terms]
                 if first_subst.func(*args):
-                    yield from fol_bc_and(kb, rest, theta)
+                    yield from fol_bc_and(kb, rest, theta, should_cancel=should_cancel)
             else:
                 raise RuntimeError(f"NativeMath encountered unbound variables: {first_subst}")
         else:
-            for theta_prime in fol_bc_or(kb, first_subst, theta):
-                for theta_double_prime in fol_bc_and(kb, rest, theta_prime):
+            for theta_prime in fol_bc_or(kb, first_subst, theta, should_cancel=should_cancel):
+                for theta_double_prime in fol_bc_and(kb, rest, theta_prime, should_cancel=should_cancel):
                     yield theta_double_prime
 
 def load_and_solve_futoshiki(file_name: str) -> tuple[list[Rule], list[Predicate], list[Var], int]:

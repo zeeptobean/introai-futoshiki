@@ -17,7 +17,7 @@ class BacktrackSolver:
         # AC-3 instance created once and reused throughout _search()
         self._ac3 = FutoshikiAC3(game) if use_ac3 else None
 
-    def solve(self, return_stats=False):
+    def solve(self, return_stats=False, trace_callback=None):
         """
         Solve using depth-first backtracking.
 
@@ -26,6 +26,22 @@ class BacktrackSolver:
             If return_stats=True --> (solution_or_none, stats_dict).
         """
         solve_start = time.perf_counter()
+        trace_step = 0
+
+        def emit(action, board=None, focus_cell=None, message="", metadata=None):
+            nonlocal trace_step
+            if trace_callback is None:
+                return
+            trace_step += 1
+            trace_callback({
+                "action": action,
+                "step_index": trace_step,
+                "board": [row[:] for row in board] if board is not None else None,
+                "focus_cell": focus_cell,
+                "message": message,
+                "metadata": metadata or {},
+            })
+
         stats = {
             "algorithm":     "backtracking",
             "use_mrv":       self.use_mrv,
@@ -36,23 +52,40 @@ class BacktrackSolver:
         }
 
         board = [row[:] for row in self.game.board]
+        emit("started", board, message="Backtracking started")
 
         # Initialize full domain once for root
         if self.use_ac3:
             root_domains = self._ac3.initial_domains(board)
             if root_domains is None:
+                emit("failed", board, message="Initial AC-3 found contradiction")
                 return (None, stats) if return_stats else None
         else:
             root_domains = None
 
-        solution = self._search(board, root_domains, stats, depth=1)
+        solution = self._search(board, root_domains, stats, depth=1, emit=emit)
         stats["execution_time"] = time.perf_counter() - solve_start
+        if solution is None:
+            emit("failed", board, message="Backtracking exhausted without solution")
+        else:
+            emit("solved", solution, message="Backtracking solved puzzle")
         return (solution, stats) if return_stats else solution
 
-    def _search(self, board, domains, stats, depth):
+    def _search(self, board, domains, stats, depth, emit):
         stats["visited_nodes"] += 1
         if depth > stats["max_recursion_depth"]:
             stats["max_recursion_depth"] = depth
+
+        emit(
+            "node_expanded",
+            board,
+            message="Explore recursive node",
+            metadata={
+                "depth": depth,
+                "visited_nodes": stats["visited_nodes"],
+                "backtracks": stats["backtracks"],
+            },
+        )
 
         if not self.game.has_empty_cell(board):
             solved, _ = self.game.is_complete_solution(board)
@@ -64,6 +97,7 @@ class BacktrackSolver:
         pos = self._select_next_cell(board, domains)
         if pos is None:
             stats["backtracks"] += 1
+            emit("backtrack", board, message="No selectable cell", metadata={"depth": depth})
             return None
 
         r, c = pos
@@ -75,6 +109,7 @@ class BacktrackSolver:
 
         if not candidates:
             stats["backtracks"] += 1
+            emit("backtrack", board, focus_cell=(r, c), message="No candidates for selected cell", metadata={"depth": depth})
             return None
 
         for val in candidates:
@@ -82,23 +117,45 @@ class BacktrackSolver:
                 continue
 
             board[r][c] = val
+            emit(
+                "assign",
+                board,
+                focus_cell=(r, c),
+                message="Try assignment",
+                metadata={"value": val, "depth": depth},
+            )
 
             # Incremental AC-3: pass parent_domains down to child
             if self.use_ac3:
                 child_domains = self._ac3.incremental_domains(domains, r, c, val)
                 if child_domains is None:
+                    emit(
+                        "contradiction",
+                        board,
+                        focus_cell=(r, c),
+                        message="AC-3 contradiction after assignment",
+                        metadata={"value": val, "depth": depth},
+                    )
                     board[r][c] = 0
                     continue
             else:
                 child_domains = None
 
-            found = self._search(board, child_domains, stats, depth + 1)
+            found = self._search(board, child_domains, stats, depth + 1, emit)
             if found is not None:
                 return found
 
             board[r][c] = 0
+            emit(
+                "backtrack",
+                board,
+                focus_cell=(r, c),
+                message="Undo assignment",
+                metadata={"value": val, "depth": depth},
+            )
 
         stats["backtracks"] += 1
+        emit("backtrack", board, focus_cell=(r, c), message="All candidates exhausted", metadata={"depth": depth})
         return None
 
     def _select_next_cell(self, board, domains):
