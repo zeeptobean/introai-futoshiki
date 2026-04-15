@@ -1,0 +1,9 @@
+certifi==2026.2.25
+charset-normalizer==3.4.7
+idna==3.11
+pip==26.0.1
+python-sat==1.9.dev2
+requests==2.33.1
+six==1.17.0
+urllib3==2.6.3
+z3-solver==4.16.0.0
