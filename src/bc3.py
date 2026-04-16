@@ -3,10 +3,7 @@ from typing import TypeAlias, TypeVar
 from collections.abc import Iterator
 import time
 
-try:
-    from myfol import *
-except ImportError:  # pragma: no cover
-    from src.myfol import *
+from myfol import *
 
 
 def _next_trace_step(trace_state):

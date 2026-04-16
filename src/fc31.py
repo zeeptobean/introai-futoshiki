@@ -1,10 +1,7 @@
 # forward chaining FOL, with optimizations
 import time
 
-try:
-    from myfol import *
-except ImportError:  # pragma: no cover
-    from src.myfol import *
+from myfol import *
 
 
 def _emit_trace(trace_callback, action, step_index, message, metadata=None):

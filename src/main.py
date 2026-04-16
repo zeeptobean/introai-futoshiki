@@ -226,7 +226,7 @@ if __name__ == "__main__":
     # test_fetch_and_solve(max_cases=20)
 
     # Run one single example by default
-    run_single_example("unassigned", USE_ONLINE=True, file_path="Inputs/input-20.txt")
+    run_single_example("unassigned", USE_ONLINE=False, file_path="Inputs/input-15.txt")
     # run_single_example("unassigned", USE_ONLINE=False, file_path="Inputs/input-20.txt")
     # run_single_example("inequality_chains")
     # run_single_example("unforced_cells")
