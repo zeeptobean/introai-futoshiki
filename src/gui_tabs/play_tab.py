@@ -47,15 +47,19 @@ class PlayTabMixin:
     def _on_play_tab_enter(self) -> None:
         self.algo_dropdown_open = False
         self.input_dropdown_open = False
-        
+
         # Detect incomplete SOLVE and abort to avoid deadlock
         if not self._is_solution_cache_valid():
-            if self.worker_state in ("running", "paused", "step_ack") and self.solution_cache is None:
+            if (
+                self.worker_state in ("running", "paused", "step_ack")
+                and self.solution_cache is None
+                and self.pending_request_mode in (None, "solve", "load_solve", "save_solve")
+            ):
                 # Incomplete SOLVE detected: abort it and fallback to AUTO solver
                 self.worker.stop_current()
                 self.pending_request_mode = None
                 self._prepare_play_cache_on_idle = False
-        
+
         self._prepare_play_answer_cache()
 
     def _apply_solution_cache(self) -> None:

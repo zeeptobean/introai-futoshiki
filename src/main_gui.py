@@ -126,6 +126,43 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         self.status_text = "Ready"
         self.latest_result: Optional[SolverResult] = None
 
+    def _switch_scene(self, new_scene: str) -> None:
+        if new_scene not in SCENES or new_scene == self.scene:
+            return
+
+        old_scene = self.scene
+        if old_scene == "SOLVE" and new_scene != "SOLVE":
+            self._on_leave_solve_tab()
+
+        self.scene = new_scene
+        if self.scene == "PLAY":
+            self._on_play_tab_enter()
+
+    def _on_leave_solve_tab(self) -> None:
+        self.animation_playing = False
+        self._restart_solve_on_idle = False
+        self._prepare_play_cache_on_idle = False
+
+        if self.worker_state in ("running", "paused", "step_ack"):
+            self.worker.stop_current()
+
+        self.pending_request_mode = None
+        self.trace_events = []
+        self.trace_solver_key = None
+        self.trace_cursor = 0
+        self.display_board = self.puzzle.clone_board()
+        self.latest_result = None
+        self.solve_completed = False
+        self.solve_no_solution = False
+        self.animation_focus_cell = None
+        self.animation_focus_action = ""
+
+        # Keep PLAY AUTO cache if available; clear only non-AUTO solve cache.
+        if self.solution_cache_source != "auto_smt":
+            self.solution_cache = None
+            self.solution_cache_signature = None
+            self.solution_cache_source = ""
+
     def _load_initial_puzzle(self) -> PuzzleSpec:
         if self.input_files:
             try:
@@ -219,9 +256,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
 
         if event.key == pygame.K_TAB:
             idx = SCENES.index(self.scene)
-            self.scene = SCENES[(idx + 1) % len(SCENES)]
-            if self.scene == "PLAY":
-                self._on_play_tab_enter()
+            self._switch_scene(SCENES[(idx + 1) % len(SCENES)])
             return
 
         if self.scene == "SOLVE":
@@ -306,11 +341,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
 
         for i, tab in enumerate(layout["tabs"]):
             if tab.hit(pos):
-                self.scene = SCENES[i]
-                if self.scene != "SOLVE":
-                    self.animation_playing = False
-                if self.scene == "PLAY":
-                    self._on_play_tab_enter()
+                self._switch_scene(SCENES[i])
                 return
 
         # Dropdown should behave as an overlay: it receives click priority.

@@ -12,6 +12,14 @@ SPEED_MAX = 20.0
 
 class SolveTabMixin:
     def _on_solve_play(self) -> None:
+        # If worker is busy with a non-SOLVE task, preempt it and restart solve.
+        if self.worker_state in ("running", "paused", "step_ack") and self.pending_request_mode != "solve":
+            self._restart_solve_on_idle = True
+            self.animation_playing = False
+            self.worker.stop_current()
+            self.status_text = "Stopping background task and starting SOLVE..."
+            return
+
         current_key = self._current_solver_key()
 
         if self.trace_solver_key != current_key:
