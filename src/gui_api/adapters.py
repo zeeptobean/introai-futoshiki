@@ -257,11 +257,40 @@ class ForwardChainingAdapter(BaseSolverAdapter):
         puzzle.validate()
         step = 0
         self._emit(trace_sink, TraceAction.STARTED, step, puzzle.board, "Forward chaining started")
+        trace_step = 0
+        emitted_assign_count = 0
+        working_board = puzzle.clone_board()
+
+        def on_fc_trace(payload):
+            nonlocal trace_step
+            nonlocal emitted_assign_count
+            if trace_sink is None:
+                return
+
+            trace_step = max(trace_step, int(payload.get("step_index", trace_step + 1)))
+            payload_with_board = dict(payload)
+            payload_with_board["step_index"] = trace_step
+
+            if payload_with_board.get("action") == TraceAction.ASSIGN.value:
+                metadata = payload_with_board.get("metadata", {})
+                row = metadata.get("row")
+                col = metadata.get("col")
+                value = metadata.get("value")
+                if isinstance(row, int) and isinstance(col, int) and isinstance(value, int):
+                    if 0 <= row < len(working_board) and 0 <= col < len(working_board[row]):
+                        working_board[row][col] = value
+                        payload_with_board["board"] = clone_board(working_board)
+                        payload_with_board["focus_cell"] = (row, col)
+                        emitted_assign_count += 1
+            else:
+                payload_with_board.setdefault("board", clone_board(working_board))
+
+            self._emit_solver_payload(trace_sink, payload_with_board)
 
         start = time.perf_counter()
         with _temporary_input_file(puzzle, symbols["write_input_file"]) as file_path:
             n, kb, rules = load_futoshiki(file_path)
-            kb_final = fol_fc(kb, rules, should_cancel=should_cancel)
+            kb_final = fol_fc(kb, rules, should_cancel=should_cancel, trace_callback=on_fc_trace)
 
         solved_board = [[0 for _ in range(n)] for _ in range(n)]
         for pred in kb_final.get("Val", set()):
@@ -278,9 +307,12 @@ class ForwardChainingAdapter(BaseSolverAdapter):
             "val_facts": len(kb_final.get("Val", set())),
             "not_val_facts": len(kb_final.get("NotVal", set())),
             "execution_time": elapsed,
+            "trace_assign_events": emitted_assign_count,
         }
 
-        step = self._emit_progressive_fill(trace_sink, step, puzzle.board, solved_board)
+        step = max(step, trace_step)
+        if emitted_assign_count == 0:
+            step = self._emit_progressive_fill(trace_sink, step, puzzle.board, solved_board)
 
         if zero_count > 0:
             step += 1
@@ -321,6 +353,18 @@ class BackwardChainingAdapter(BaseSolverAdapter):
         puzzle.validate()
         step = 0
         self._emit(trace_sink, TraceAction.STARTED, step, puzzle.board, "Backward chaining started")
+        trace_step = 0
+
+        def on_bc_trace(payload):
+            nonlocal trace_step
+            if trace_sink is None:
+                return
+            trace_step = max(trace_step, int(payload.get("step_index", trace_step + 1)))
+            payload_with_step = dict(payload)
+            payload_with_step["step_index"] = trace_step
+            self._emit_solver_payload(trace_sink, payload_with_step)
+
+        trace_state = {"step_index": 0}
 
         start = time.perf_counter()
         with _temporary_input_file(puzzle, symbols["write_input_file"]) as file_path:
@@ -328,7 +372,14 @@ class BackwardChainingAdapter(BaseSolverAdapter):
 
             solved_board = None
             solution_count = 0
-            for theta in fol_bc_and(kb, query_goals, {}, should_cancel=should_cancel):
+            for theta in fol_bc_and(
+                kb,
+                query_goals,
+                {},
+                should_cancel=should_cancel,
+                trace_callback=on_bc_trace,
+                trace_state=trace_state,
+            ):
                 solution_count += 1
                 grid = [[0 for _ in range(size)] for _ in range(size)]
                 for var in variables:
@@ -346,6 +397,8 @@ class BackwardChainingAdapter(BaseSolverAdapter):
             "solutions_examined": solution_count,
             "execution_time": elapsed,
         }
+
+        step = max(step, trace_step)
 
         if solved_board is not None:
             step = self._emit_progressive_fill(trace_sink, step, puzzle.board, solved_board)

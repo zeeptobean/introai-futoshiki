@@ -65,6 +65,8 @@ def load_and_solve_futoshiki(file_name: str):
     lines = [line.strip() for line in file_content.strip().split('\n')]
     data = [line for line in lines if line and not line.startswith('#')]
     
+    print(f"Loaded puzzle from {file_name} with {len(data)} lines of data (excluding comments/whitespace).")
+
     if not data:
         raise ValueError("Input file is empty or only contains comments/whitespace.")
 
@@ -106,7 +108,7 @@ def load_and_solve_futoshiki(file_name: str):
 if __name__ == "__main__":
     # Assuming you have a file named 'puzzle.txt'
     start_time = time.perf_counter()
-    load_and_solve_futoshiki('input-01.txt')
+    load_and_solve_futoshiki('Inputs/input-18.txt')
     time_taken = time.perf_counter() - start_time
     print(f"\nTotal time taken: {time_taken:.4f} seconds")
     pass

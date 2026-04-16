@@ -6,6 +6,26 @@ try:
 except ImportError:  # pragma: no cover
     from src.myfol import *
 
+
+def _emit_trace(trace_callback, action, step_index, message, metadata=None):
+    if trace_callback is None:
+        return
+    trace_callback(
+        {
+            "action": action,
+            "step_index": step_index,
+            "message": message,
+            "metadata": metadata or {},
+        }
+    )
+
+
+def _theta_to_payload(theta):
+    payload = {}
+    for key, value in theta.items():
+        payload[str(key)] = str(value)
+    return payload
+
 def substitute(theta, predicate):
     new_terms = []
     for term in predicate.terms:
@@ -57,18 +77,37 @@ def match_premises(premises, kb, theta, should_cancel=None):
         if theta_new is not None:
             yield from match_premises(rest_premises, kb, theta_new, should_cancel=should_cancel)
 
-def fol_fc(kb, rules, should_cancel=None):
+def fol_fc(kb, rules, should_cancel=None, trace_callback=None):
     # print("\n--- Starting Forward Chaining ---")
     new_facts_found = True
     iteration = 1
+    step_index = 0
     
     while new_facts_found:
         if should_cancel is not None and should_cancel():
             raise RuntimeError("Solve cancelled")
+
+        step_index += 1
+        _emit_trace(
+            trace_callback,
+            "progress",
+            step_index,
+            "FC iteration {} started".format(iteration),
+            {
+                "phase": "iteration_started",
+                "iteration": iteration,
+                "facts_total": sum(len(v) for v in kb.values()),
+                "val_facts": len(kb.get("Val", set())),
+                "not_val_facts": len(kb.get("NotVal", set())),
+            },
+        )
+
         new_facts_found = False
+        new_val_count = 0
+        new_not_val_count = 0
         # print(f"Iteration {iteration} running...")
         
-        for rule in rules:
+        for rule_idx, rule in enumerate(rules):
             if should_cancel is not None and should_cancel():
                 raise RuntimeError("Solve cancelled")
             for theta in match_premises(rule.premises, kb, {}, should_cancel=should_cancel):
@@ -79,6 +118,49 @@ def fol_fc(kb, rules, should_cancel=None):
                 if q_prime not in category:
                     category.add(q_prime)
                     new_facts_found = True
+
+                    if q_prime.name == "Val":
+                        new_val_count += 1
+                        step_index += 1
+                        _emit_trace(
+                            trace_callback,
+                            "assign",
+                            step_index,
+                            "FC derived Val({}, {}, {})".format(
+                                q_prime.terms[0].name,
+                                q_prime.terms[1].name,
+                                q_prime.terms[2].name,
+                            ),
+                            {
+                                "phase": "derived_val",
+                                "iteration": iteration,
+                                "rule_index": rule_idx,
+                                "row": q_prime.terms[0].name - 1,
+                                "col": q_prime.terms[1].name - 1,
+                                "value": q_prime.terms[2].name,
+                                "fact": str(q_prime),
+                                "theta": _theta_to_payload(theta),
+                            },
+                        )
+                    elif q_prime.name == "NotVal":
+                        new_not_val_count += 1
+
+        step_index += 1
+        _emit_trace(
+            trace_callback,
+            "progress",
+            step_index,
+            "FC iteration {} finished".format(iteration),
+            {
+                "phase": "iteration_done",
+                "iteration": iteration,
+                "new_val_facts": new_val_count,
+                "new_not_val_facts": new_not_val_count,
+                "facts_total": sum(len(v) for v in kb.values()),
+                "val_facts": len(kb.get("Val", set())),
+                "not_val_facts": len(kb.get("NotVal", set())),
+            },
+        )
         iteration += 1
     
     # print("--- Forward Chaining Exhausted ---")
