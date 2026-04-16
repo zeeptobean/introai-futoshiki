@@ -61,6 +61,18 @@ def _import_bc_symbols():
     }
 
 
+def _import_auto_symbols():
+    """Import AUTO SMT solver symbols with run-root fallback."""
+    try:
+        from auto import solve_puzzle_spec
+    except ImportError:  # pragma: no cover
+        from src.auto import solve_puzzle_spec
+
+    return {
+        "solve_puzzle_spec": solve_puzzle_spec,
+    }
+
+
 class BaseSolverAdapter(ABC):
     def __init__(self, solver_type: SolverType):
         self.solver_type = solver_type
@@ -423,6 +435,65 @@ class BackwardChainingAdapter(BaseSolverAdapter):
         )
 
 
+class AutoAdapter(BaseSolverAdapter):
+    def __init__(self):
+        super().__init__(SolverType.AUTO)
+
+    def solve(
+        self,
+        puzzle: PuzzleSpec,
+        config: SolverConfig,
+        trace_sink: Optional[TraceSink] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ) -> SolverResult:
+        symbols = _import_auto_symbols()
+        solve_puzzle_spec = symbols["solve_puzzle_spec"]
+
+        puzzle.validate()
+        step = 0
+        self._emit(trace_sink, TraceAction.STARTED, step, puzzle.board, "AUTO (SMT) started")
+
+        if should_cancel is not None and should_cancel():
+            raise RuntimeError("Solve cancelled")
+
+        timeout_ms = config.metadata.get("timeout_ms") if config.metadata else None
+
+        start = time.perf_counter()
+        solved_board = solve_puzzle_spec(
+            puzzle.size,
+            puzzle.board,
+            puzzle.constraints,
+            timeout_ms=timeout_ms,
+        )
+        elapsed = time.perf_counter() - start
+
+        stats = {
+            "algorithm": "auto_smt",
+            "execution_time": elapsed,
+        }
+        if timeout_ms is not None:
+            stats["timeout_ms"] = timeout_ms
+
+        if solved_board is None:
+            step += 1
+            self._emit(trace_sink, TraceAction.FAILED, step, puzzle.board, "AUTO (SMT) found no solution", stats)
+            return SolverResult(
+                status=SolverStatus.UNSAT,
+                solved_board=None,
+                stats=stats,
+                message="No solution found",
+            )
+
+        step += 1
+        self._emit(trace_sink, TraceAction.SOLVED, step, solved_board, "AUTO (SMT) solved puzzle", stats)
+        return SolverResult(
+            status=SolverStatus.SOLVED,
+            solved_board=solved_board,
+            stats=stats,
+            message="Solved",
+        )
+
+
 class _temporary_input_file:
     """Context manager to pass PuzzleSpec to file-based solvers."""
 
@@ -451,4 +522,6 @@ def build_adapter(solver_type: SolverType) -> BaseSolverAdapter:
         return ForwardChainingAdapter()
     if solver_type == SolverType.BACKWARD_CHAINING:
         return BackwardChainingAdapter()
+    if solver_type == SolverType.AUTO:
+        return AutoAdapter()
     raise ValueError("Unsupported solver type: {}".format(solver_type))

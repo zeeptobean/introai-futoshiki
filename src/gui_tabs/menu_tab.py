@@ -21,6 +21,8 @@ class MenuTabMixin:
             self.menu_board = self.puzzle.clone_board()
             self.menu_constraints = list(self.puzzle.constraints)
             self.solution_cache = None
+            self.solution_cache_signature = None
+            self.solution_cache_source = ""
             self.trace_events = []
             self.trace_solver_key = None
             self.trace_cursor = 0
@@ -44,6 +46,8 @@ class MenuTabMixin:
         self.menu_board = self.puzzle.clone_board()
         self.menu_constraints = []
         self.solution_cache = None
+        self.solution_cache_signature = None
+        self.solution_cache_source = ""
         self.trace_events = []
         self.trace_solver_key = None
         self.trace_cursor = 0
@@ -62,6 +66,8 @@ class MenuTabMixin:
         self.menu_board = [[0] * size for _ in range(size)]
         self.menu_constraints = []
         self.solution_cache = None
+        self.solution_cache_signature = None
+        self.solution_cache_source = ""
         self.undo_stack = []
         self.error_cells = set()
         self.selected_cell = None
@@ -93,6 +99,8 @@ class MenuTabMixin:
         self.initial_given_cells = self._compute_given_cells(self.initial_board)
 
         self.solution_cache = None
+        self.solution_cache_signature = None
+        self.solution_cache_source = ""
         self.trace_events = []
         self.trace_solver_key = None
         self.trace_cursor = 0

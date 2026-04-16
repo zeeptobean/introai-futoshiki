@@ -90,6 +90,8 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         self.menu_board = self.puzzle.clone_board()
         self.menu_constraints = list(self.puzzle.constraints)
         self.solution_cache: Optional[List[List[int]]] = None
+        self.solution_cache_signature = None
+        self.solution_cache_source = ""
         self.initial_board = self.puzzle.clone_board()
         self.initial_constraints = list(self.puzzle.constraints)
         self.initial_given_cells: Set[Tuple[int, int]] = self._compute_given_cells(self.initial_board)
@@ -100,6 +102,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         self.solve_no_solution = False
         self.play_completed = False
         self._restart_solve_on_idle = False
+        self._prepare_play_cache_on_idle = False
 
         self.selected_algo_idx = 0
         self.algo_dropdown_open = False
@@ -217,6 +220,8 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         if event.key == pygame.K_TAB:
             idx = SCENES.index(self.scene)
             self.scene = SCENES[(idx + 1) % len(SCENES)]
+            if self.scene == "PLAY":
+                self._on_play_tab_enter()
             return
 
         if self.scene == "SOLVE":
@@ -472,6 +477,9 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                 if self.worker_state == "idle" and self._restart_solve_on_idle:
                     self._restart_solve_on_idle = False
                     self._start_solving()
+                if self.worker_state == "idle" and self._prepare_play_cache_on_idle:
+                    self._prepare_play_cache_on_idle = False
+                    self._prepare_play_answer_cache()
                 continue
 
             if item["type"] == "trace":
@@ -485,6 +493,8 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                 self.pending_request_mode = None
                 if result.status == SolverStatus.SOLVED and result.solved_board is not None:
                     self.solution_cache = [row[:] for row in result.solved_board]
+                    self.solution_cache_signature = self._current_puzzle_signature()
+                    self.solution_cache_source = result.stats.get("algorithm", "")
                     self.solve_no_solution = False
                     if mode == "hint":
                         self._apply_hint_from_cache()
@@ -492,6 +502,8 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                         self._apply_solution_cache()
                     elif mode == "show_answer":
                         self._apply_solve_answer_from_cache()
+                    elif mode == "play_auto_cache":
+                        self.status_text = "PLAY answer cache ready (AUTO)."
                     elif mode == "load_solve":
                         self.status_text = "Loaded puzzle solved in background. Trace ready for SOLVE tab."
                     elif mode == "save_solve":
@@ -500,12 +512,18 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                         self.status_text = "Solved."
                         self.solve_completed = True
                 elif result.status == SolverStatus.UNSAT:
+                    if mode == "play_auto_cache":
+                        self.solution_cache = None
+                        self.solution_cache_signature = None
+                        self.solution_cache_source = ""
                     self.solve_completed = False
                     self.solve_no_solution = True
                     if mode == "hint":
                         self.status_text = "Hint unavailable: puzzle has no solution."
                     elif mode == "solution":
                         self.status_text = "Solution unavailable: puzzle has no solution."
+                    elif mode == "play_auto_cache":
+                        self.status_text = "PLAY answer unavailable: puzzle has no solution."
                     elif mode == "show_answer":
                         self.display_board = self.puzzle.clone_board()
                         self.trace_cursor = len(self.trace_events)
@@ -520,16 +538,26 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                     else:
                         self.status_text = "No solution found."
                 elif result.status == SolverStatus.CANCELLED:
+                    if mode == "play_auto_cache":
+                        self.solution_cache = None
+                        self.solution_cache_signature = None
+                        self.solution_cache_source = ""
                     self.solve_completed = False
                     self.solve_no_solution = False
                     self.status_text = "Solve cancelled."
                 else:
+                    if mode == "play_auto_cache":
+                        self.solution_cache = None
+                        self.solution_cache_signature = None
+                        self.solution_cache_source = ""
                     self.solve_completed = False
                     self.solve_no_solution = False
                     if mode == "hint":
                         self.status_text = "Hint failed: {}".format(result.message)
                     elif mode == "solution":
                         self.status_text = "Solution failed: {}".format(result.message)
+                    elif mode == "play_auto_cache":
+                        self.status_text = "PLAY answer prepare failed: {}".format(result.message)
                     else:
                         self.status_text = "Solver error: {}".format(result.message)
 
@@ -539,6 +567,49 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             size=self.puzzle.size,
             board=[row[:] for row in board],
             constraints=list(self.puzzle.constraints),
+        )
+
+    def _current_puzzle_signature(self):
+        board_key = tuple(tuple(int(v) for v in row) for row in self.puzzle.board)
+        constraints_key = tuple(sorted(self.puzzle.constraints))
+        return (self.puzzle.size, board_key, constraints_key)
+
+    def _is_solution_cache_valid(self) -> bool:
+        if self.solution_cache is None:
+            return False
+        if self.solution_cache_signature is None:
+            return False
+        return self.solution_cache_signature == self._current_puzzle_signature()
+
+    def _build_play_auto_config(self) -> SolverConfig:
+        return SolverConfig(
+            solver_type=SolverType.AUTO,
+            heuristic="n/a",
+            use_mrv=False,
+            use_ac3=False,
+            max_solutions=1,
+            metadata={"timeout_ms": 20000},
+        )
+
+    def _prepare_play_answer_cache(self) -> None:
+        if self._is_solution_cache_valid():
+            return
+
+        if self.worker_state in ("running", "paused", "step_ack"):
+            self._prepare_play_cache_on_idle = True
+            self.status_text = "Preparing PLAY answer cache..."
+            return
+
+        self.pending_request_mode = "play_auto_cache"
+        self.status_text = "Preparing PLAY answer cache (AUTO)..."
+        config = self._build_play_auto_config()
+        self.worker.submit_solve(
+            PuzzleSpec(
+                size=self.puzzle.size,
+                board=self.puzzle.clone_board(),
+                constraints=list(self.puzzle.constraints),
+            ),
+            config,
         )
 
     def _layout(self, w: int, h: int):

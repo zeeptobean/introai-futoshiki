@@ -20,6 +20,8 @@ class SolveTabMixin:
             self.trace_cursor = 0
             self.latest_result = None
             self.solution_cache = None
+            self.solution_cache_signature = None
+            self.solution_cache_source = ""
             self.solve_completed = False
             self.solve_no_solution = False
             self.pending_request_mode = None

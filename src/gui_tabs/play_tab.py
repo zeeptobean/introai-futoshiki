@@ -4,7 +4,10 @@
 class PlayTabMixin:
     def _hint_action(self) -> None:
         if self.solution_cache is None:
-            self.status_text = "Hint unavailable: open SOLVE and press Play first."
+            if self.pending_request_mode == "play_auto_cache":
+                self.status_text = "Hint unavailable: PLAY answer cache is still preparing."
+            else:
+                self.status_text = "Hint unavailable: open PLAY to prepare answer cache first."
             return
         self._apply_hint_from_cache()
 
@@ -33,37 +36,16 @@ class PlayTabMixin:
 
     def _solution_action(self) -> None:
         if self.solution_cache is None:
-            self.status_text = "Solution unavailable: open SOLVE and press Play first."
+            if self.pending_request_mode == "play_auto_cache":
+                self.status_text = "Show Answer unavailable: PLAY answer cache is still preparing."
+            else:
+                self.status_text = "Show Answer unavailable: open PLAY to prepare answer cache first."
             return
 
         self._apply_solution_cache()
 
     def _on_play_tab_enter(self) -> None:
-        issues = self._analyze_board_issues(self.play_board)
-        has_empty = any(0 in row for row in self.play_board)
-        if (not issues) and (not has_empty):
-            return
-
-        current_key = self._current_solver_key()
-
-        if self.worker_state in ("running", "paused", "step_ack"):
-            if self.trace_solver_key != current_key:
-                self._restart_solve_on_idle = True
-                self.worker.stop_current()
-                self.status_text = "PLAY entered: switching algorithm and restarting solve..."
-            else:
-                self.status_text = "PLAY entered: solver is already running in background."
-            return
-
-        is_done_for_current = (
-            self.trace_solver_key == current_key
-            and self.latest_result is not None
-            and self.latest_result.status.value in ("solved", "unsat")
-        )
-        if is_done_for_current:
-            return
-
-        self._start_solving()
+        self._prepare_play_answer_cache()
 
     def _apply_solution_cache(self) -> None:
         if self.solution_cache is None:
