@@ -314,7 +314,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                 return
 
         # Dropdown should behave as an overlay: it receives click priority.
-        if self.scene != "MENU" and self._handle_algo_dropdown_click(pos, layout):
+        if self.scene == "SOLVE" and self._handle_algo_dropdown_click(pos, layout):
             return
 
         if self.scene == "MENU" and self._handle_input_dropdown_click(pos, layout):
@@ -361,8 +361,6 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             self._on_solve_play()
         elif label == "Pause":
             self.animation_playing = False
-            if self.worker_state == "running":
-                self.worker.pause()
         elif label == "Step":
             self.animation_playing = False
             if self.worker_state == "paused":
@@ -397,7 +395,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             self.status_text = "Info panel {}.".format("shown" if self.show_status_panel else "hidden")
 
     def _handle_algo_dropdown_click(self, pos: Tuple[int, int], layout: dict) -> bool:
-        if self.scene == "MENU":
+        if self.scene != "SOLVE":
             return False
 
         main_rect = layout["algo_dropdown"]["main"]
@@ -495,6 +493,8 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                     self.solution_cache = [row[:] for row in result.solved_board]
                     self.solution_cache_signature = self._current_puzzle_signature()
                     self.solution_cache_source = result.stats.get("algorithm", "")
+                    if mode == "play_auto_cache":
+                        self._prepare_play_cache_on_idle = False
                     self.solve_no_solution = False
                     if mode == "hint":
                         self._apply_hint_from_cache()
@@ -516,6 +516,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                         self.solution_cache = None
                         self.solution_cache_signature = None
                         self.solution_cache_source = ""
+                        self._prepare_play_cache_on_idle = False
                     self.solve_completed = False
                     self.solve_no_solution = True
                     if mode == "hint":
@@ -542,6 +543,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                         self.solution_cache = None
                         self.solution_cache_signature = None
                         self.solution_cache_source = ""
+                        self._prepare_play_cache_on_idle = False
                     self.solve_completed = False
                     self.solve_no_solution = False
                     self.status_text = "Solve cancelled."
@@ -550,6 +552,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                         self.solution_cache = None
                         self.solution_cache_signature = None
                         self.solution_cache_source = ""
+                        self._prepare_play_cache_on_idle = False
                     self.solve_completed = False
                     self.solve_no_solution = False
                     if mode == "hint":
@@ -579,7 +582,12 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             return False
         if self.solution_cache_signature is None:
             return False
+        if self.solution_cache_source != "auto_smt":
+            return False
         return self.solution_cache_signature == self._current_puzzle_signature()
+
+    def _is_play_cache_preparing(self) -> bool:
+        return self._prepare_play_cache_on_idle or self.pending_request_mode == "play_auto_cache"
 
     def _build_play_auto_config(self) -> SolverConfig:
         return SolverConfig(
@@ -600,6 +608,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             self.status_text = "Preparing PLAY answer cache..."
             return
 
+        self._prepare_play_cache_on_idle = False
         self.pending_request_mode = "play_auto_cache"
         self.status_text = "Preparing PLAY answer cache (AUTO)..."
         config = self._build_play_auto_config()
@@ -647,7 +656,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             }
 
         input_top = panel_rect.top + 30
-        if self.scene != "MENU":
+        if self.scene == "SOLVE":
             dropdown_main = pygame.Rect(panel_rect.left + 10, panel_rect.top + 30, panel_rect.width - 20, 36)
             dropdown_data = build_dropdown(
                 dropdown_main,
@@ -675,7 +684,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                 bx = panel_rect.left + 10 + i * (size_w + 6)
                 size_buttons.append(Button("{}x{}".format(size, size), pygame.Rect(bx, size_y, size_w, 30)))
 
-        y = size_y + 54 if self.scene == "MENU" else dropdown_main.bottom + 32
+        y = size_y + 54 if self.scene == "MENU" else (dropdown_main.bottom + 32 if dropdown_main is not None else panel_rect.top + 32)
         if self.scene == "SOLVE":
             button_labels = [
                 "Play",
@@ -914,7 +923,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         self.screen.blit(title, (panel_rect.left + 10, panel_rect.top - 28))
 
         # Draw main dropdown field first.
-        if self.scene != "MENU":
+        if self.scene == "SOLVE":
             self._draw_algo_dropdown(layout, overlay_only=False)
         if self.scene == "MENU":
             self._draw_input_dropdown(layout, overlay_only=False)
@@ -948,12 +957,21 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
                 panel_rect.width - 24,
                 self.font_small,
             )
+            if self.scene == "PLAY":
+                algorithm_line = "AUTO (PLAY)"
+                solver_line = "auto_smt"
+                heuristic_line = "n/a"
+            else:
+                algorithm_line = self.selected_algo_label
+                solver_line = self.selected_solver.value
+                heuristic_line = self.selected_heuristic
+
             lines = [
                 "Scene: {}".format(self.scene),
                 "Worker: {}".format(self.worker_state),
-                "Algorithm: {}".format(self.selected_algo_label),
-                "Solver: {}".format(self.selected_solver.value),
-                "Heuristic: {}".format(self.selected_heuristic),
+                "Algorithm: {}".format(algorithm_line),
+                "Solver: {}".format(solver_line),
+                "Heuristic: {}".format(heuristic_line),
                 "Animation: {:.2f}x".format(self.animation_speed),
                 "Trace: {}/{}".format(self.trace_cursor, len(self.trace_events)),
             ]
@@ -969,7 +987,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
             self.screen.blit(text, (panel_rect.left + 12, y))
 
         # Draw dropdown overlays last so they are not covered by status/tips.
-        if self.scene != "MENU":
+        if self.scene == "SOLVE":
             self._draw_algo_dropdown(layout, overlay_only=True)
         if self.scene == "MENU":
             self._draw_input_dropdown(layout, overlay_only=True)
@@ -1048,7 +1066,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         return cells
 
     def _draw_algo_dropdown(self, layout: dict, overlay_only: bool) -> None:
-        if self.scene == "MENU":
+        if self.scene != "SOLVE":
             return
 
         dropdown = layout.get("algo_dropdown")
@@ -1244,7 +1262,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
     def _handle_dropdown_wheel(self, button: int, pos: Tuple[int, int], layout: dict) -> bool:
         delta = -DROPDOWN_SCROLL_STEP if button == 4 else DROPDOWN_SCROLL_STEP
 
-        if self.algo_dropdown_open and self.scene != "MENU":
+        if self.algo_dropdown_open and self.scene == "SOLVE":
             dropdown = layout.get("algo_dropdown")
             if dropdown is not None and dropdown["list_rect"].collidepoint(pos):
                 self.algo_dropdown_scroll = self._clamp_dropdown_scroll(self.algo_dropdown_scroll + delta, dropdown)

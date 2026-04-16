@@ -3,8 +3,8 @@
 
 class PlayTabMixin:
     def _hint_action(self) -> None:
-        if self.solution_cache is None:
-            if self.pending_request_mode == "play_auto_cache":
+        if not self._is_solution_cache_valid():
+            if self._is_play_cache_preparing():
                 self.status_text = "Hint unavailable: PLAY answer cache is still preparing."
             else:
                 self.status_text = "Hint unavailable: open PLAY to prepare answer cache first."
@@ -35,8 +35,8 @@ class PlayTabMixin:
         self.status_text = "Hint filled ({}, {}) = {}".format(r + 1, c + 1, hint_val)
 
     def _solution_action(self) -> None:
-        if self.solution_cache is None:
-            if self.pending_request_mode == "play_auto_cache":
+        if not self._is_solution_cache_valid():
+            if self._is_play_cache_preparing():
                 self.status_text = "Show Answer unavailable: PLAY answer cache is still preparing."
             else:
                 self.status_text = "Show Answer unavailable: open PLAY to prepare answer cache first."
@@ -45,6 +45,17 @@ class PlayTabMixin:
         self._apply_solution_cache()
 
     def _on_play_tab_enter(self) -> None:
+        self.algo_dropdown_open = False
+        self.input_dropdown_open = False
+        
+        # Detect incomplete SOLVE and abort to avoid deadlock
+        if not self._is_solution_cache_valid():
+            if self.worker_state in ("running", "paused", "step_ack") and self.solution_cache is None:
+                # Incomplete SOLVE detected: abort it and fallback to AUTO solver
+                self.worker.stop_current()
+                self.pending_request_mode = None
+                self._prepare_play_cache_on_idle = False
+        
         self._prepare_play_answer_cache()
 
     def _apply_solution_cache(self) -> None:
