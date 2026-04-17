@@ -268,55 +268,55 @@ def load_and_solve_futoshiki(file_name: str) -> tuple[list[Rule], list[Predicate
     for i in range(1, size + 1):
         kb.append(Rule([], Predicate("Domain", [Const(i)])))
 
-    # define Val(i, j, v) for the Interpreter
+    # define Val(i, j, v) purely as base facts
     for r in range(1, size + 1):
         for c in range(1, size + 1):
             if (r, c) in givens:
-                # If given, Val is an absolute fact.
+                # Given fact
                 kb.append(Rule([], Predicate("Val", [Const(r), Const(c), Const(givens[(r, c)])])))
             else:
-                # If blank, Val draws from the Domain.
-                # Rule: Domain(v) => Val(r, c, v)
-                kb.append(Rule([Predicate("Domain", [Var("v")])], Predicate("Val", [Const(r), Const(c), Var("v")])))
+                # Assert the 6 possible states directly as facts, completely bypassing Domain(v)
+                for val in range(1, size + 1):
+                    kb.append(Rule([], Predicate("Val", [Const(r), Const(c), Const(val)])))
 
 
-    # construct SLD query goals for each cell and constraints
+    # construct SLD query goals with reordering
     query_goals = []
     variables = []
     
-    for r in range(1, size + 1):
-        for c in range(1, size + 1):
+    for r in range(size, 0, -1):
+        for c in range(size, 0, -1):
             v_rc = Var(f"v_{r}_{c}")
             variables.append(v_rc)
             
-            # 1. Query Val(i, j, ?) for each cell
+            # 1. Query Val
             query_goals.append(Predicate("Val", [Const(r), Const(c), v_rc]))
             
-            # Row Uniqueness 
-            for c_prev in range(1, c):
+            # Row Uniqueness (checking against columns > c)
+            for c_prev in range(c + 1, size + 1):
                 v_prev = Var(f"v_{r}_{c_prev}")
                 query_goals.append(NativeMath(lambda x, y: x != y, [v_rc, v_prev]))
                 
-            # Column Uniqueness
-            for r_prev in range(1, r):
+            # Column Uniqueness (checking against rows > r)
+            for r_prev in range(r + 1, size + 1):
                 v_prev = Var(f"v_{r_prev}_{c}")
                 query_goals.append(NativeMath(lambda x, y: x != y, [v_rc, v_prev]))
             
-            # Horizontal Check (left neighbor: r, c-1)
-            if (r, c - 1) in less_h:
-                v_left = Var(f"v_{r}_{c-1}")
-                query_goals.append(NativeMath(lambda left, right: left < right, [v_left, v_rc]))
-            elif (r, c - 1) in greater_h:
-                v_left = Var(f"v_{r}_{c-1}")
-                query_goals.append(NativeMath(lambda left, right: left > right, [v_left, v_rc]))
-            
-            # Vertical Check (top neighbor: r-1, c)
-            if (r - 1, c) in less_v:
-                v_top = Var(f"v_{r-1}_{c}")
-                query_goals.append(NativeMath(lambda top, bottom: top < bottom, [v_top, v_rc]))
-            elif (r - 1, c) in greater_v:
-                v_top = Var(f"v_{r-1}_{c}")
-                query_goals.append(NativeMath(lambda top, bottom: top > bottom, [v_top, v_rc]))
+            # Horizontal Check (right neighbor: r, c+1 is already bound in this reverse loop)
+            if (r, c) in less_h: # v_r_c < v_r_c+1
+                v_right = Var(f"v_{r}_{c+1}")
+                query_goals.append(NativeMath(lambda left, right: left < right, [v_rc, v_right]))
+            elif (r, c) in greater_h: # v_r_c > v_r_c+1
+                v_right = Var(f"v_{r}_{c+1}")
+                query_goals.append(NativeMath(lambda left, right: left > right, [v_rc, v_right]))
+                
+            # Vertical Check (bottom neighbor: r+1, c is already bound in this reverse loop)
+            if (r, c) in less_v: # v_r_c < v_r+1_c
+                v_bottom = Var(f"v_{r+1}_{c}")
+                query_goals.append(NativeMath(lambda top, bottom: top < bottom, [v_rc, v_bottom]))
+            elif (r, c) in greater_v: # v_r_c > v_r+1_c
+                v_bottom = Var(f"v_{r+1}_{c}")
+                query_goals.append(NativeMath(lambda top, bottom: top > bottom, [v_rc, v_bottom]))
 
     return kb, query_goals, variables, size
 
