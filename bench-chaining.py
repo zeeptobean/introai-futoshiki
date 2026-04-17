@@ -1,6 +1,5 @@
 import argparse
 import csv
-import glob
 import logging
 import os
 import re
@@ -24,9 +23,13 @@ from src.fc31 import fol_fc, load_futoshiki as load_fc_futoshiki
 from src.bc3 import fol_bc_and, load_and_solve_futoshiki as load_bc_futoshiki, subst
 
 
+INPUT_NAME_PATTERN = re.compile(r"input-(\d+)\.txt$")
+BYTES_PER_KB = 1024.0
+
+
 def _input_sort_key(path: str) -> int:
     name = os.path.basename(path)
-    m = re.search(r"input-(\d+)\.txt$", name)
+    m = INPUT_NAME_PATTERN.search(name)
     return int(m.group(1)) if m else 10**9
 
 
@@ -131,7 +134,7 @@ def _run_fc_once(input_path: str) -> Tuple[Optional[List[List[int]]], float, flo
         _, peak_bytes = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
-    peak_kb = peak_bytes / (1024.0)
+    peak_kb = peak_bytes / BYTES_PER_KB
     fc_board = _extract_fc_board(final_kb, n)
     return fc_board, elapsed, peak_kb
 
@@ -155,7 +158,7 @@ def _run_bc_once(input_path: str) -> Tuple[Optional[List[List[int]]], float, flo
         _, peak_bytes = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
-    peak_kb = peak_bytes / (1024.0)
+    peak_kb = peak_bytes / BYTES_PER_KB
     bc_board = _extract_bc_board(solution_theta, variables, size)
     return bc_board, elapsed, peak_kb
 
@@ -165,6 +168,7 @@ def _run_and_record(
     input_path: str,
     logger: logging.Logger,
     runner: Callable[[str], Tuple[Optional[List[List[int]]], float, float]],
+    z3_board: Optional[List[List[int]]],
 ) -> List[str]:
     filename = os.path.basename(input_path)
     _log_info(logger, "run_start | algo=%s | input=%s", algo_name, filename)
@@ -178,19 +182,11 @@ def _run_and_record(
         run_ok = False
         err = repr(exc)
 
-    # Invoke Z3 checker for this run
-    try:
-        z3_board = load_and_solve_futoshiki(input_path)
-        is_correct = run_ok and (board is not None) and (z3_board is not None) and (board == z3_board)
-    except Exception as exc:
-        is_correct = False
-        if err:
-            err += " | "
-        err += "z3=" + repr(exc)
+    is_correct = run_ok and (board is not None) and (z3_board is not None) and (board == z3_board)
 
     _log_info(
         logger,
-        "run_end | algo=%s | input=%s | time=%.6f | memory_mb=%.6f | iscorrect=%s | error=%s",
+        "run_end | algo=%s | input=%s | time=%.6f | memory_kb=%.6f | iscorrect=%s | error=%s",
         algo_name,
         filename,
         sec,
@@ -209,13 +205,29 @@ def _run_and_record(
 
 
 def benchmark_all(inputs_dir: str, logger: logging.Logger) -> List[List[str]]:
-    paths = glob.glob(os.path.join(inputs_dir, "input-*.txt"))
+    input_dir = Path(inputs_dir)
+    paths = [str(p) for p in input_dir.glob("input-*.txt") if p.is_file()]
     paths.sort(key=_input_sort_key)
 
     rows: List[List[str]] = []
     for path in paths:
-        rows.append(_run_and_record("forward_chaining_fc31", path, logger, _run_fc_once))
-        rows.append(_run_and_record("backward_chaining_bc3", path, logger, _run_bc_once))
+        z3_board = None
+        z3_err = ""
+        try:
+            z3_board = load_and_solve_futoshiki(path)
+        except Exception as exc:
+            z3_err = repr(exc)
+
+        if z3_err:
+            _log_info(
+                logger,
+                "z3_check_failed | input=%s | error=%s",
+                os.path.basename(path),
+                z3_err,
+            )
+
+        # rows.append(_run_and_record("forward_chaining_fc31", path, logger, _run_fc_once, z3_board))
+        rows.append(_run_and_record("backward_chaining_bc3", path, logger, _run_bc_once, z3_board))
     return rows
 
 
