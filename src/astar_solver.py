@@ -76,17 +76,35 @@ class AStarSolver:
     #  SOLVE                                                               #
     # ------------------------------------------------------------------ #
 
-    def solve(self, return_stats=False):
+    def solve(self, return_stats=False, trace_callback=None):
         """
         Solve Futoshiki using A* with f(n) = g(n) + h(n).
         """
+        trace_step = 0
+
+        def emit(action, board=None, focus_cell=None, message="", metadata=None):
+            nonlocal trace_step
+            if trace_callback is None:
+                return
+            trace_step += 1
+            trace_callback({
+                "action": action,
+                "step_index": trace_step,
+                "board": board if board is not None else None,
+                "focus_cell": focus_cell,
+                "message": message,
+                "metadata": metadata or {},
+            })
+
         solve_start = time.perf_counter()
         tracemalloc.start()
         start_board = self.game.board
+        emit("started", start_board, message="A* started")
 
         # Initialize full domain once for root state
         start_domains = self._ac3.initial_domains(start_board)
         if start_domains is None:
+            emit("failed", start_board, message="Initial AC-3 found contradiction")
             stats = self._build_stats(0, 0, 1)
             stats.update(self._runtime_stats(solve_start))
             return (None, stats) if return_stats else None
@@ -94,6 +112,7 @@ class AStarSolver:
         start_tuple = tuple(tuple(row) for row in start_board)
         start_h     = self._heuristic(start_tuple, start_domains)
         if start_h == float("inf"):
+            emit("failed", start_board, message="Initial heuristic deemed state unsatisfiable")
             stats = self._build_stats(0, 0, 1)
             stats.update(self._runtime_stats(solve_start))
             return (None, stats) if return_stats else None
@@ -112,11 +131,25 @@ class AStarSolver:
             expanded += 1
 
             curr_board = [list(row) for row in state.board_tuple]
+            emit(
+                "node_expanded",
+                curr_board,
+                message="Expand next node",
+                metadata={
+                    "expanded_nodes": expanded,
+                    "generated_nodes": generated,
+                    "queue_size": len(pq),
+                    "g": state.g,
+                    "h": state.h,
+                    "f": state.f,
+                },
+            )
 
             empty_pos = self._find_next_cell(state.board_tuple, state.domains)
             if empty_pos is None:
                 is_solved, _ = self.game.is_complete_solution(curr_board)
                 if is_solved:
+                    emit("solved", curr_board, message="A* solved puzzle")
                     stats = self._build_stats(expanded, generated, max_queue)
                     stats.update(self._runtime_stats(solve_start))
                     return (curr_board, stats) if return_stats else curr_board
@@ -136,6 +169,13 @@ class AStarSolver:
 
                 new_domains = self._ac3.incremental_domains(state.domains, r, c, val)
                 if new_domains is None:
+                    emit(
+                        "contradiction",
+                        curr_board,
+                        focus_cell=(r, c),
+                        message="AC-3 contradiction after assignment",
+                        metadata={"value": val},
+                    )
                     continue
 
                 new_h = self._heuristic(new_tuple, new_domains)
@@ -145,9 +185,24 @@ class AStarSolver:
                     new_state = SearchState(new_tuple, new_domains, new_g, new_h, tie_id)
                     heapq.heappush(pq, new_state)
                     generated += 1
+                    emit(
+                        "assign",
+                        [list(row) for row in new_tuple],
+                        focus_cell=(r, c),
+                        message="Generated valid child state",
+                        metadata={
+                            "value": val,
+                            "generated_nodes": generated,
+                            "queue_size": len(pq),
+                            "g": new_g,
+                            "h": new_h,
+                            "f": new_state.f,
+                        },
+                    )
                     if len(pq) > max_queue:
                         max_queue = len(pq)
 
+        emit("failed", start_board, message="A* search exhausted without solution")
         stats = self._build_stats(expanded, generated, max_queue)
         stats.update(self._runtime_stats(solve_start))
         return (None, stats) if return_stats else None

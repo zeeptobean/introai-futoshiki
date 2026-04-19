@@ -158,7 +158,7 @@ def run_single_backtracking_example(use_mrv=True, use_ac3=True, USE_ONLINE=True,
 def run_single_example(heuristic="inequality_chains", USE_ONLINE=True, file_path=None):
 
     if USE_ONLINE:
-        puzzle = FutoshikiFetcher.fetch_puzzle(size=9, difficulty=2, game_id=6767)
+        puzzle = FutoshikiFetcher.fetch_puzzle(size=9, difficulty=3, game_id=6767)
         if puzzle:
             n           = puzzle["size"]
             board       = puzzle["board"]
@@ -189,7 +189,7 @@ def run_single_example(heuristic="inequality_chains", USE_ONLINE=True, file_path
         print(row)
 
     game   = Futoshiki(n, normalize_board(board), constraints)
-    solver = AStarSolver(game, heuristic=heuristic, use_mrv=False)
+    solver = AStarSolver(game, heuristic=heuristic, use_mrv=True)
     result, stats = solver.solve(return_stats=True)
 
     if result:
@@ -226,11 +226,11 @@ if __name__ == "__main__":
     # test_fetch_and_solve(max_cases=20)
 
     # Run one single example by default
-    run_single_example("unassigned", USE_ONLINE=True, file_path="Inputs/input-20.txt")
+    run_single_example("unassigned", USE_ONLINE=False, file_path="Inputs/input-15.txt")
     # run_single_example("unassigned", USE_ONLINE=False, file_path="Inputs/input-20.txt")
     # run_single_example("inequality_chains")
     # run_single_example("unforced_cells")
     # run_single_example("weighted_domain")
 
-    run_single_backtracking_example(use_mrv=True, use_ac3=True, USE_ONLINE=True, file_path="Inputs/input-01.txt")
+    # run_single_backtracking_example(use_mrv=True, use_ac3=True, USE_ONLINE=True, file_path="Inputs/input-01.txt")
     # run_single_backtracking_example(use_mrv=False, use_ac3=False)

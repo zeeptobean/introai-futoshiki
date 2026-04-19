@@ -7,3 +7,4 @@ requests==2.33.1
 six==1.17.0
 urllib3==2.6.3
 z3-solver==4.16.0.0
+pygame==2.6.1

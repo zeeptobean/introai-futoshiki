@@ -25,6 +25,17 @@ def _next_step(trace_state):
     return trace_state["step_index"]
 
 
+def _board_from_kb(kb, N):
+    board = [[0 for _ in range(N)] for _ in range(N)]
+    for fact in kb.get("Val", set()):
+        r = fact.terms[0].name - 1
+        c = fact.terms[1].name - 1
+        v = fact.terms[2].name
+        if 0 <= r < N and 0 <= c < N:
+            board[r][c] = v
+    return board
+
+
 def _theta_to_payload(theta):
     payload = {}
     for key, value in theta.items():
@@ -43,9 +54,38 @@ def substitute(theta, predicate):
             new_terms.append(term)
     return Predicate(predicate.name, new_terms)
 
-# ==========================================
-# 3. Forward Chaining Engine
-# ==========================================
+def is_consistent(kb, N):
+    """
+    Checks the KB for logical contradictions.
+    Returns False if the state is invalid, True otherwise.
+    """
+    vals = kb.get("Val", set())
+    not_vals = kb.get("NotVal", set())
+
+    #Check for multiple different values in the same cell
+    cell_vals = {}
+    for val_fact in vals:
+        i, j, v = val_fact.terms[0].name, val_fact.terms[1].name, val_fact.terms[2].name
+        if (i, j) in cell_vals and cell_vals[(i, j)] != v:
+            return False # Contradiction: Cell has multiple values
+        cell_vals[(i, j)] = v
+
+    #Check if a cell has both Val(i,j,v) and NotVal(i,j,v)
+    for val_fact in vals:
+        if Predicate("NotVal", val_fact.terms) in not_vals:
+            return False # Contradiction: Cell is both v and Not v
+
+    #Check for cells that have 0 possible values left
+    not_val_counts = {}
+    for nv_fact in not_vals:
+        i, j = nv_fact.terms[0].name, nv_fact.terms[1].name
+        not_val_counts[(i, j)] = not_val_counts.get((i, j), 0) + 1
+        
+    for count in not_val_counts.values():
+        if count >= N:
+            return False # Contradiction: All N possibilities eliminated for a cell
+
+    return True
 
 def match_premises(premises, kb, theta, should_cancel=None):
     if should_cancel is not None and should_cancel():
@@ -82,26 +122,11 @@ def match_premises(premises, kb, theta, should_cancel=None):
         if theta_new is not None:
             yield from match_premises(rest_premises, kb, theta_new, should_cancel=should_cancel)
 
-def _fact_focus_cell(fact):
-    """Best-effort conversion from Predicate terms to 0-based (row, col)."""
-    try:
-        if fact is None or len(fact.terms) < 2:
-            return None
-        row0 = int(fact.terms[0].name) - 1
-        col0 = int(fact.terms[1].name) - 1
-        if row0 < 0 or col0 < 0:
-            return None
-        return (row0, col0)
-    except Exception:
-        return None
-
 def fol_fc(kb, rules, should_cancel=None, trace_callback=None, trace_state=None):
     new_facts_found = True
     iteration = 1
     if trace_state is None:
         trace_state = {"step_index": 0}
-
-    emit_scan_events = bool(trace_state.get("emit_scan_events", True))
 
     while new_facts_found:
         if should_cancel is not None and should_cancel():
@@ -128,113 +153,49 @@ def fol_fc(kb, rules, should_cancel=None, trace_callback=None, trace_state=None)
         for rule_idx, rule in enumerate(rules):
             if should_cancel is not None and should_cancel():
                 raise RuntimeError("Solve cancelled")
-
             for theta in match_premises(rule.premises, kb, {}, should_cancel=should_cancel):
                 q_prime = substitute(theta, rule.conclusion)
-                focus_cell = _fact_focus_cell(q_prime)
-
-                # Cell-by-cell "search" animation event, even before insertion.
-                if emit_scan_events and focus_cell is not None:
-                    _emit_trace(
-                        trace_callback,
-                        "progress",
-                        _next_step(trace_state),
-                        "FC consider {}".format(str(q_prime)),
-                        {
-                            "phase": "consider_fact",
-                            "iteration": iteration,
-                            "rule_index": rule_idx,
-                            "fact": str(q_prime),
-                            "theta": _theta_to_payload(theta),
-                        },
-                        focus_cell=focus_cell,
-                    )
-
                 category = kb.setdefault(q_prime.name, set())
-                if q_prime in category:
-                    continue
+                if q_prime not in category:
+                    if q_prime.name == "Val":
+                        r = q_prime.terms[0].name
+                        c = q_prime.terms[1].name
+                        v = q_prime.terms[2].name
+                        is_occupied = any(
+                            f.terms[0].name == r and f.terms[1].name == c and f.terms[2].name != v
+                            for f in kb.get("Val", set())
+                        )
+                        if is_occupied:
+                            category.add(q_prime)
+                            return kb
 
-                if q_prime.name == "Val":
-                    r = q_prime.terms[0].name
-                    c = q_prime.terms[1].name
-                    v = q_prime.terms[2].name
-                    is_occupied = any(
-                        f.terms[0].name == r and f.terms[1].name == c and f.terms[2].name != v
-                        for f in kb.get("Val", set())
-                    )
-                    if is_occupied:
-                        # Emit contradiction-like progress so GUI highlights where FC stopped.
-                        if focus_cell is not None:
-                            _emit_trace(
-                                trace_callback,
-                                "progress",
-                                _next_step(trace_state),
-                                "FC conflict at ({}, {}) while deriving {}".format(r, c, v),
-                                {
-                                    "phase": "conflict",
-                                    "iteration": iteration,
-                                    "rule_index": rule_idx,
-                                    "row": r - 1,
-                                    "col": c - 1,
-                                    "value": v,
-                                    "fact": str(q_prime),
-                                },
-                                focus_cell=focus_cell,
-                            )
-                        category.add(q_prime)
-                        return kb
+                    category.add(q_prime)
+                    new_facts_found = True
 
-                category.add(q_prime)
-                new_facts_found = True
-
-                if q_prime.name == "Val":
-                    row0 = q_prime.terms[0].name - 1
-                    col0 = q_prime.terms[1].name - 1
-                    new_val_count += 1
-                    _emit_trace(
-                        trace_callback,
-                        "assign",
-                        _next_step(trace_state),
-                        "FC derived Val({}, {}, {})".format(
-                            q_prime.terms[0].name,
-                            q_prime.terms[1].name,
-                            q_prime.terms[2].name,
-                        ),
-                        {
-                            "phase": "derived_val",
-                            "iteration": iteration,
-                            "rule_index": rule_idx,
-                            "row": row0,
-                            "col": col0,
-                            "value": q_prime.terms[2].name,
-                            "fact": str(q_prime),
-                            "theta": _theta_to_payload(theta),
-                        },
-                        focus_cell=(row0, col0),
-                    )
-
-                elif q_prime.name == "NotVal":
-                    row0 = q_prime.terms[0].name - 1
-                    col0 = q_prime.terms[1].name - 1
-                    value = q_prime.terms[2].name
-                    new_not_val_count += 1
-                    _emit_trace(
-                        trace_callback,
-                        "progress",
-                        _next_step(trace_state),
-                        "FC eliminate {} at ({}, {})".format(value, row0 + 1, col0 + 1),
-                        {
-                            "phase": "derived_not_val",
-                            "iteration": iteration,
-                            "rule_index": rule_idx,
-                            "row": row0,
-                            "col": col0,
-                            "value": value,
-                            "fact": str(q_prime),
-                            "theta": _theta_to_payload(theta),
-                        },
-                        focus_cell=(row0, col0),
-                    )
+                    if q_prime.name == "Val":
+                        new_val_count += 1
+                        _emit_trace(
+                            trace_callback,
+                            "assign",
+                            _next_step(trace_state),
+                            "FC derived Val({}, {}, {})".format(
+                                q_prime.terms[0].name,
+                                q_prime.terms[1].name,
+                                q_prime.terms[2].name,
+                            ),
+                            {
+                                "phase": "derived_val",
+                                "iteration": iteration,
+                                "rule_index": rule_idx,
+                                "row": q_prime.terms[0].name - 1,
+                                "col": q_prime.terms[1].name - 1,
+                                "value": q_prime.terms[2].name,
+                                "fact": str(q_prime),
+                                "theta": _theta_to_payload(theta),
+                            },
+                        )
+                    elif q_prime.name == "NotVal":
+                        new_not_val_count += 1
 
         _emit_trace(
             trace_callback,
@@ -421,6 +382,168 @@ base_rules = [
     )
 ]
 
+def get_degree(r, c, kb):
+    """Calculates how many inequality constraints involve cell (r, c)"""
+    degree = 0
+    for fact in kb.get("LessH", set()):
+        if (fact.terms[0].name == r and fact.terms[1].name == c) or \
+           (fact.terms[0].name == r and fact.terms[1].name == c - 1): degree += 1
+    for fact in kb.get("GreaterH", set()):
+        if (fact.terms[0].name == r and fact.terms[1].name == c) or \
+           (fact.terms[0].name == r and fact.terms[1].name == c - 1): degree += 1
+    for fact in kb.get("LessV", set()):
+        if (fact.terms[0].name == r and fact.terms[1].name == c) or \
+           (fact.terms[0].name == r - 1 and fact.terms[1].name == c): degree += 1
+    for fact in kb.get("GreaterV", set()):
+        if (fact.terms[0].name == r and fact.terms[1].name == c) or \
+           (fact.terms[0].name == r - 1 and fact.terms[1].name == c): degree += 1
+    return degree
+
+def solve_with_backtracking(kb, rules, N, depth=0, trace_callback=None, should_cancel=None, trace_state=None):
+    """
+    Recursively solves the puzzle using Forward Chaining + Backtracking.
+    """
+    if should_cancel is not None and should_cancel():
+        raise RuntimeError("Solve cancelled")
+    if trace_state is None:
+        trace_state = {"step_index": 0}
+
+    # Propagate constraints using Forward Chaining
+    kb = fol_fc(kb, rules, should_cancel=should_cancel, trace_callback=trace_callback, trace_state=trace_state)
+
+    # Check if the newly propagated KB is valid
+    if not is_consistent(kb, N):
+        _emit_trace(
+            trace_callback,
+            "progress",
+            _next_step(trace_state),
+            "Backtrack: contradiction at depth {}".format(depth),
+            {"phase": "dead_end", "depth": depth},
+            board=_board_from_kb(kb, N),
+        )
+        return None
+
+    # Check if solved (all N*N cells have a value)
+    vals = kb.get("Val", set())
+    if len(vals) == N * N:
+        _emit_trace(
+            trace_callback,
+            "progress",
+            _next_step(trace_state),
+            "Solved at depth {}".format(depth),
+            {"phase": "solved_node", "depth": depth},
+            board=_board_from_kb(kb, N),
+        )
+        return kb
+
+    # MRV Heuristic: Find unassigned cell with smallest domain
+    assigned_cells = {(f.terms[0].name, f.terms[1].name) for f in vals}
+    not_vals = kb.get("NotVal", set())
+
+    # OPTIMIZATION: Pre-group NotVal facts for O(1) lookups
+    eliminated_by_cell = {}
+    for nv in not_vals:
+        r_nv, c_nv, v_nv = nv.terms[0].name, nv.terms[1].name, nv.terms[2].name
+        eliminated_by_cell.setdefault((r_nv, c_nv), set()).add(v_nv)
+    
+    best_cell = None
+    best_domain = []
+    best_domain_size = N + 1
+    best_degree = -1
+
+    for r in range(1, N + 1):
+        for c in range(1, N + 1):
+            if (r, c) not in assigned_cells:
+                # Calculate remaining possible values for this cell
+                eliminated = eliminated_by_cell.get((r, c), set())
+                domain = [v for v in range(1, N + 1) if v not in eliminated]
+
+                if len(domain) == 0:
+                    _emit_trace(
+                        trace_callback,
+                        "progress",
+                        _next_step(trace_state),
+                        "Backtrack: empty domain at ({}, {})".format(r, c),
+                        {"phase": "dead_end", "depth": depth, "row": r - 1, "col": c - 1},
+                        board=_board_from_kb(kb, N),
+                        focus_cell=(r - 1, c - 1),
+                    )
+                    return None 
+
+                if len(domain) < best_domain_size:
+                    best_domain_size = len(domain)
+                    best_cell = (r, c)
+                    best_domain = domain
+                elif len(domain) == best_domain_size:
+                    cell_degree = get_degree(r, c, kb)
+                    if cell_degree > best_degree:
+                        best_cell = (r, c)
+                        best_domain = domain
+                        best_degree = cell_degree
+
+    if not best_cell:
+        return None
+
+    r, c = best_cell
+    _emit_trace(
+        trace_callback,
+        "progress",
+        _next_step(trace_state),
+        "Select cell ({}, {}) with domain {}".format(r, c, best_domain),
+        {
+            "phase": "select_cell",
+            "depth": depth,
+            "row": r - 1,
+            "col": c - 1,
+            "domain": list(best_domain),
+            "domain_size": len(best_domain),
+        },
+        board=_board_from_kb(kb, N),
+        focus_cell=(r - 1, c - 1),
+    )
+    for v in best_domain:
+        new_kb = {k: set(v_set) for k, v_set in kb.items()}
+        
+        # Inject our guess as a new Given/Val fact
+        add_fact(new_kb, Predicate("Val", [Const(r), Const(c), Const(v)]))
+
+        _emit_trace(
+            trace_callback,
+            "assign",
+            _next_step(trace_state),
+            "Try {} at ({}, {})".format(v, r, c),
+            {
+                "phase": "try_value",
+                "depth": depth,
+                "row": r - 1,
+                "col": c - 1,
+                "value": v,
+            },
+            board=_board_from_kb(new_kb, N),
+            focus_cell=(r - 1, c - 1),
+        )
+        
+        result_kb = solve_with_backtracking(new_kb, rules, N, depth + 1, trace_callback=trace_callback, should_cancel=should_cancel, trace_state=trace_state)
+        if result_kb is not None:
+            _emit_trace(
+                trace_callback,
+                "progress",
+                _next_step(trace_state),
+                "Backtrack from {} at ({}, {})".format(v, r, c),
+                {
+                    "phase": "backtrack",
+                    "depth": depth,
+                    "row": r - 1,
+                    "col": c - 1,
+                    "value": v,
+                },
+                board=_board_from_kb(kb, N),
+                focus_cell=(r - 1, c - 1),
+            )
+            return result_kb
+
+    return None
+
 def add_fact(kb, fact):
     """Helper to safely add a fact to the dictionary-based KB."""
     kb.setdefault(fact.name, set()).add(fact)
@@ -560,35 +683,49 @@ def load_futoshiki(file_name: str):
     # 2. Boundaries (Instant edge trimming, no deep bindings required)
     # 3. Sudoku Uniqueness
     # 4. Inequalities 
-    # 5. Hidden Single (HEAVIEST rule, goes last to benefit from prior pruning)
+    # Hidden single is not needed as we are doing backtracking
     rules = [
         base_rules[0],                   # Given -> Val
         *generate_boundary_rules(N),     # Absolute Boundaries
         base_rules[1],                   # Row Uniqueness
         base_rules[2],                   # Col Uniqueness
         *base_rules[3:],                 # Horizontal & Vertical Inequalities
-        generate_hidden_single_rule(N)   # Hidden Single
+        # generate_hidden_single_rule(N)   # Hidden Single
     ]
 
     return N, kb, rules
     
 def mainfunc2():
-    n, kb, rules = load_futoshiki("Inputs/input-10.txt")
+    n, kb, rules = load_futoshiki("Inputs/input-12.txt")
     print(f"Loaded Futoshiki puzzle of size {n}x{n} with {sum(len(v) for v in kb.values())} initial facts.")
+    
     time_start = time.perf_counter()
-    final_kb = fol_fc(kb, rules)
+    
+    # Use the new backtracking solver instead of just fol_fc
+    final_kb = solve_with_backtracking(kb, rules, n)
+    
     time_running = time.perf_counter() - time_start
-    val_facts = final_kb.get("Val", set())
-    not_val_facts = final_kb.get("NotVal", set())
 
-    print("\n--- Summary of Deduced Values ---")
-    vals = sorted(list(val_facts), key=lambda x: (x.terms[0].name, x.terms[1].name))
-    for val in vals:
-        print(f"Cell ({val.terms[0]}, {val.terms[1]}) = {val.terms[2]}")
+    if final_kb is None:
+        print("\nNo solution exists or contradiction reached.")
+    else:
+        print("\n--- Summary of Deduced Values ---")
+        val_facts = final_kb.get("Val", set())
+        vals = sorted(list(val_facts), key=lambda x: (x.terms[0].name, x.terms[1].name))
+        
+        # Print Grid Formatted
+        grid = [[0]*n for _ in range(n)]
+        for val in vals:
+            r, c, v = val.terms[0].name, val.terms[1].name, val.terms[2].name
+            grid[r-1][c-1] = v
+            
+        for row in grid:
+            print(" ".join(str(x) for x in row))
 
     print(f"\nTotal time taken: {time_running:.4f} seconds")
-    # print("\n--- Summary of Eliminated Possibilities ---")
-    # print(f"Total eliminated choices: {len(not_val_facts)}")
+
+if __name__ == "__main__":
+    mainfunc2()
 
 
 if __name__ == "__main__":
