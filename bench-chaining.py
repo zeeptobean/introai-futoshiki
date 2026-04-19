@@ -248,7 +248,8 @@ def benchmark_all(inputs_dir: str, logger: logging.Logger) -> List[List[str]]:
             )
 
         # rows.append(_run_and_record("forward_chaining_fc31", path, logger, _run_fc_once, z3_board))
-        rows.append(_run_and_record("backward_chaining_bc3", path, logger, _run_bc_once, z3_board))
+        # rows.append(_run_and_record("backward_chaining_bc3", path, logger, _run_bc_once, z3_board))
+        rows.append(_run_and_record("forward_chaining_backtrack", path, logger, _run_fcbt_once, z3_board))
     return rows
 
 
