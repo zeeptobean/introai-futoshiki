@@ -1,4 +1,4 @@
-# forward chaining FOL, with optimizations
+# forward chaining FOL with MRV search
 import time
 
 from myfol import *
@@ -83,7 +83,7 @@ def is_consistent(kb, N):
         
     for count in not_val_counts.values():
         if count >= N:
-            return False # Contradiction: All N possibilities eliminated for a cell
+            return False
 
     return True
 
@@ -683,7 +683,7 @@ def load_futoshiki(file_name: str):
     # 2. Boundaries (Instant edge trimming, no deep bindings required)
     # 3. Sudoku Uniqueness
     # 4. Inequalities 
-    # Hidden single is not needed as we are doing backtracking
+    # Hidden single is not needed as we are doing heuristic
     rules = [
         base_rules[0],                   # Given -> Val
         *generate_boundary_rules(N),     # Absolute Boundaries

@@ -1,4 +1,4 @@
-# forward chaining FOL, with optimizations
+# forward chaining FOL 
 import time
 
 from myfol import *
@@ -42,10 +42,6 @@ def substitute(theta, predicate):
         else:
             new_terms.append(term)
     return Predicate(predicate.name, new_terms)
-
-# ==========================================
-# 3. Forward Chaining Engine
-# ==========================================
 
 def match_premises(premises, kb, theta, should_cancel=None):
     if should_cancel is not None and should_cancel():
