@@ -515,17 +515,94 @@ class BackwardChainingAdapter(BaseSolverAdapter):
         step = 0
         self._emit(trace_sink, TraceAction.STARTED, step, puzzle.board, "Backward chaining started")
         trace_step = 0
+        emitted_assign_count = 0
+        emitted_backtrack_count = 0
+        emitted_expand_count = 0
+
+        working_board = puzzle.clone_board()
+        cell_history = {}
+
+        if working_board is None:
+            return SolverResult(
+                status=SolverStatus.UNSAT,
+                solved_board=None,
+                stats={"algorithm": "backward_chaining"},
+                message="Invalid puzzle board",
+            )
 
         def on_bc_trace(payload):
             nonlocal trace_step
+            nonlocal emitted_assign_count
+            nonlocal emitted_backtrack_count
+            nonlocal emitted_expand_count
             if trace_sink is None:
                 return
             trace_step = max(trace_step, int(payload.get("step_index", trace_step + 1)))
-            payload_with_step = dict(payload)
-            payload_with_step["step_index"] = trace_step
-            self._emit_solver_payload(trace_sink, payload_with_step)
+            payload_with_board = dict(payload)
+            payload_with_board["step_index"] = trace_step
 
-        trace_state = {"step_index": 0}
+            metadata = payload_with_board.get("metadata", {}) or {}
+            action_name = payload_with_board.get("action", TraceAction.PROGRESS.value)
+
+            row = metadata.get("row")
+            col = metadata.get("col")
+            value = metadata.get("value")
+
+            has_cell = (
+                isinstance(row, int)
+                and isinstance(col, int)
+                and 0 <= row < len(working_board)
+                and 0 <= col < len(working_board[row])
+            )
+
+            if action_name == TraceAction.ASSIGN.value and has_cell and isinstance(value, int):
+                key = (row, col)
+                previous_value = working_board[row][col]
+                cell_history.setdefault(key, []).append(previous_value)
+                working_board[row][col] = value
+
+                payload_with_board["focus_cell"] = key
+                md = dict(metadata)
+                md.setdefault("previous_value", previous_value)
+                payload_with_board["metadata"] = md
+                emitted_assign_count += 1
+
+            elif action_name == TraceAction.BACKTRACK.value and has_cell:
+                key = (row, col)
+                history = cell_history.get(key, [])
+                restored_value = history.pop() if history else puzzle.board[row][col]
+                working_board[row][col] = restored_value
+
+                payload_with_board["focus_cell"] = key
+                md = dict(metadata)
+                md.setdefault("restored_value", restored_value)
+                payload_with_board["metadata"] = md
+                emitted_backtrack_count += 1
+
+            elif action_name == TraceAction.NODE_EXPANDED.value and has_cell:
+                payload_with_board["focus_cell"] = (row, col)
+                emitted_expand_count += 1
+
+            payload_with_board["board"] = clone_board(working_board)
+            self._emit_solver_payload(trace_sink, payload_with_board)
+
+        meta = config.metadata or {}
+
+        def _meta_int(name, default, minimum):
+            raw = meta.get(name, default)
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                value = default
+            return max(minimum, value)
+
+        trace_state = {
+            "step_index": 0,
+            "emit_progress_events": bool(meta.get("bc_emit_progress_events", False)),
+            "emit_cell_expand_events": bool(meta.get("bc_emit_cell_expand_events", False)),
+            "cell_expand_every": _meta_int("bc_cell_expand_every", 4, 1),
+            "max_events": _meta_int("bc_max_trace_events", 3000, 0),
+        }
 
         start = time.perf_counter()
         with _temporary_input_file(puzzle, symbols["write_input_file"]) as file_path:
@@ -557,12 +634,16 @@ class BackwardChainingAdapter(BaseSolverAdapter):
             "algorithm": "backward_chaining",
             "solutions_examined": solution_count,
             "execution_time": elapsed,
+            "trace_assign_events": emitted_assign_count,
+            "trace_backtrack_events": emitted_backtrack_count,
+            "trace_expand_events": emitted_expand_count,
         }
 
         step = max(step, trace_step)
 
-        if solved_board is not None:
+        if solved_board is not None and working_board != solved_board:
             step = self._emit_progressive_fill(trace_sink, step, puzzle.board, solved_board)
+            working_board = clone_board(solved_board)
 
         if solved_board is None:
             step += 1

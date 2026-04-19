@@ -14,8 +14,13 @@ def _next_trace_step(trace_state):
 
 
 def _emit_trace(trace_callback, trace_state, action, message, metadata=None):
-    if trace_callback is None:
+    if trace_callback is None or trace_state is None:
         return
+    
+    max_events = trace_state.get("max_events", 0)
+    if max_events > 0 and trace_state.get("step_index", 0) >= max_events:
+        return
+
     trace_callback(
         {
             "action": action,
@@ -57,9 +62,62 @@ def standardize_variables(rule: Rule) -> Rule:
 
     return Rule(rename(rule.premises), rename(rule.conclusion))
 
-# ==========================================
-# 3. Backward Chaining Algorithm
-# ==========================================
+def _decode_cell_var_name(var_name):
+    parts = str(var_name).split("_")
+    if len(parts) != 3 or parts[0] != "v":
+        return None
+    try:
+        row = int(parts[1]) - 1
+        col = int(parts[2]) - 1
+    except ValueError:
+        return None
+    if row < 0 or col < 0:
+        return None
+    return (row, col)
+
+
+def _extract_goal_cell(goal):
+    if not isinstance(goal, Predicate):
+        return None
+    if goal.name != "Val" or len(goal.terms) < 2:
+        return None
+
+    row_term, col_term = goal.terms[0], goal.terms[1]
+    if not isinstance(row_term, Const) or not isinstance(col_term, Const):
+        return None
+
+    return (int(row_term.name) - 1, int(col_term.name) - 1)
+
+
+def _extract_new_cell_bindings(theta_before, theta_after):
+    if theta_before is None or theta_after is None:
+        return []
+
+    bindings = []
+    for var, value_term in theta_after.items():
+        if var in theta_before:
+            continue
+        if not isinstance(var, Var):
+            continue
+
+        cell = _decode_cell_var_name(var.name)
+        if cell is None:
+            continue
+
+        resolved_value = subst(theta_after, value_term)
+        if not isinstance(resolved_value, Const):
+            continue
+
+        row, col = cell
+        bindings.append(
+            {
+                "var_name": var.name,
+                "row": row,
+                "col": col,
+                "value": int(resolved_value.name),
+            }
+        )
+    return bindings
 
 def fol_bc_or(
     kb: list[Rule],
@@ -88,31 +146,76 @@ def fol_bc_or(
     for rule in kb:
         if should_cancel is not None and should_cancel():
             raise RuntimeError("Solve cancelled")
-        rule_std = standardize_variables(rule)
+        # OPTIMIZATION: If it's a pure fact with no premises, assume it has no variables 
+        # (True for our Val facts) and skip the expensive standardization.
+        if len(rule.premises) == 0:
+            rule_std = rule
+        else:
+            rule_std = standardize_variables(rule)
         theta_prime = unify(rule_std.conclusion, goal, theta)
-        if theta_prime is not None:
+        if theta_prime is None:
+            continue
+
+        _emit_trace(
+            trace_callback,
+            trace_state,
+            "progress",
+            "BC matched rule for goal {}".format(goal),
+            {
+                "phase": "rule_match_success",
+                "depth": depth,
+                "goal": str(goal),
+                "conclusion": str(rule_std.conclusion),
+            },
+        )
+
+        # Emit assignment candidates for GUI animation.
+        new_bindings = _extract_new_cell_bindings(theta, theta_prime)
+        for binding in new_bindings:
             _emit_trace(
                 trace_callback,
                 trace_state,
-                "progress",
-                "BC matched rule for goal {}".format(goal),
+                "assign",
+                "BC try {} at ({}, {})".format(binding["value"], binding["row"] + 1, binding["col"] + 1),
                 {
-                    "phase": "rule_match_success",
+                    "phase": "assign_candidate",
                     "depth": depth,
-                    "goal": str(goal),
-                    "conclusion": str(rule_std.conclusion),
+                    "row": binding["row"],
+                    "col": binding["col"],
+                    "value": binding["value"],
+                    "var_name": binding["var_name"],
                 },
             )
-            for next_theta in fol_bc_and(
-                kb,
-                rule_std.premises,
-                theta_prime,
-                should_cancel=should_cancel,
-                trace_callback=trace_callback,
-                trace_state=trace_state,
-                depth=depth + 1,
-            ):
-                yield next_theta
+
+        produced_solution = False
+        for next_theta in fol_bc_and(
+            kb,
+            rule_std.premises,
+            theta_prime,
+            should_cancel=should_cancel,
+            trace_callback=trace_callback,
+            trace_state=trace_state,
+            depth=depth + 1,
+        ):
+            produced_solution = True
+            yield next_theta
+
+        if not produced_solution and new_bindings:
+            for binding in reversed(new_bindings):
+                _emit_trace(
+                    trace_callback,
+                    trace_state,
+                    "backtrack",
+                    "BC backtrack from ({}, {})".format(binding["row"] + 1, binding["col"] + 1),
+                    {
+                        "phase": "backtrack_assignment",
+                        "depth": depth,
+                        "row": binding["row"],
+                        "col": binding["col"],
+                        "value": binding["value"],
+                        "var_name": binding["var_name"],
+                    },
+                )
 
 def fol_bc_and(
     kb: list[Rule],
@@ -152,6 +255,29 @@ def fol_bc_and(
                 "remaining_goals": len(rest),
             },
         )
+
+        emit_cell_expand = True
+        if trace_state is not None:
+            emit_cell_expand = bool(trace_state.get("emit_cell_expand_events", False))
+
+        if emit_cell_expand:
+            cell = _extract_goal_cell(first_subst)
+            if cell is not None:
+                row, col = cell
+                _emit_trace(
+                    trace_callback,
+                    trace_state,
+                    "node_expanded",
+                    "BC explore cell ({}, {})".format(row + 1, col + 1),
+                    {
+                        "phase": "cell_expand",
+                        "depth": depth,
+                        "row": row,
+                        "col": col,
+                        "goal": str(first_subst),
+                        "remaining_goals": len(rest),
+                    },
+                )
         
         # Intercept and immediately evaluate NativeMath variables once grounded
         if isinstance(first_subst, NativeMath):
@@ -268,6 +394,13 @@ def load_and_solve_futoshiki(file_name: str) -> tuple[list[Rule], list[Predicate
     for i in range(1, size + 1):
         kb.append(Rule([], Predicate("Domain", [Const(i)])))
 
+    # Keep track of givens per row and column
+    given_rows = {i: set() for i in range(1, size + 1)}
+    given_cols = {i: set() for i in range(1, size + 1)}
+    for (r, c), val in givens.items():
+        given_rows[r].add(val)
+        given_cols[c].add(val)
+
     # define Val(i, j, v) purely as base facts
     for r in range(1, size + 1):
         for c in range(1, size + 1):
@@ -275,9 +408,10 @@ def load_and_solve_futoshiki(file_name: str) -> tuple[list[Rule], list[Predicate
                 # Given fact
                 kb.append(Rule([], Predicate("Val", [Const(r), Const(c), Const(givens[(r, c)])])))
             else:
-                # Assert the 6 possible states directly as facts, completely bypassing Domain(v)
                 for val in range(1, size + 1):
-                    kb.append(Rule([], Predicate("Val", [Const(r), Const(c), Const(val)])))
+                    # OPTIMIZATION: Only add the fact if it doesn't immediately violate a given row/col
+                    if val not in given_rows[r] and val not in given_cols[c]:
+                        kb.append(Rule([], Predicate("Val", [Const(r), Const(c), Const(val)])))
 
 
     # construct SLD query goals with reordering
