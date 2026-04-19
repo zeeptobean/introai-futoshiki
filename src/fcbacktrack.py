@@ -4,17 +4,36 @@ import time
 from myfol import *
 
 
-def _emit_trace(trace_callback, action, step_index, message, metadata=None):
+def _emit_trace(trace_callback, action, step_index, message, metadata=None, board=None, focus_cell=None):
     if trace_callback is None:
         return
-    trace_callback(
-        {
-            "action": action,
-            "step_index": step_index,
-            "message": message,
-            "metadata": metadata or {},
-        }
-    )
+    payload = {
+        "action": action,
+        "step_index": step_index,
+        "message": message,
+        "metadata": metadata or {},
+    }
+    if board is not None:
+        payload["board"] = board
+    if focus_cell is not None:
+        payload["focus_cell"] = focus_cell
+    trace_callback(payload)
+
+
+def _next_step(trace_state):
+    trace_state["step_index"] = int(trace_state.get("step_index", 0)) + 1
+    return trace_state["step_index"]
+
+
+def _board_from_kb(kb, N):
+    board = [[0 for _ in range(N)] for _ in range(N)]
+    for fact in kb.get("Val", set()):
+        r = fact.terms[0].name - 1
+        c = fact.terms[1].name - 1
+        v = fact.terms[2].name
+        if 0 <= r < N and 0 <= c < N:
+            board[r][c] = v
+    return board
 
 
 def _theta_to_payload(theta):
@@ -103,21 +122,20 @@ def match_premises(premises, kb, theta, should_cancel=None):
         if theta_new is not None:
             yield from match_premises(rest_premises, kb, theta_new, should_cancel=should_cancel)
 
-def fol_fc(kb, rules, should_cancel=None, trace_callback=None):
-    # print("\n--- Starting Forward Chaining ---")
+def fol_fc(kb, rules, should_cancel=None, trace_callback=None, trace_state=None):
     new_facts_found = True
     iteration = 1
-    step_index = 0
-    
+    if trace_state is None:
+        trace_state = {"step_index": 0}
+
     while new_facts_found:
         if should_cancel is not None and should_cancel():
             raise RuntimeError("Solve cancelled")
 
-        step_index += 1
         _emit_trace(
             trace_callback,
             "progress",
-            step_index,
+            _next_step(trace_state),
             "FC iteration {} started".format(iteration),
             {
                 "phase": "iteration_started",
@@ -131,45 +149,35 @@ def fol_fc(kb, rules, should_cancel=None, trace_callback=None):
         new_facts_found = False
         new_val_count = 0
         new_not_val_count = 0
-        # print(f"Iteration {iteration} running...")
-        
+
         for rule_idx, rule in enumerate(rules):
             if should_cancel is not None and should_cancel():
                 raise RuntimeError("Solve cancelled")
             for theta in match_premises(rule.premises, kb, {}, should_cancel=should_cancel):
                 q_prime = substitute(theta, rule.conclusion)
-                
-                # --- OPTIMIZATION: Dictionary Insertion ---
                 category = kb.setdefault(q_prime.name, set())
                 if q_prime not in category:
-                    # Contradiction Circuit Breaker
                     if q_prime.name == "Val":
                         r = q_prime.terms[0].name
                         c = q_prime.terms[1].name
                         v = q_prime.terms[2].name
-                        
-                        # Check if this cell is already occupied by a DIFFERENT value
                         is_occupied = any(
-                            f.terms[0].name == r and f.terms[1].name == c and f.terms[2].name != v 
+                            f.terms[0].name == r and f.terms[1].name == c and f.terms[2].name != v
                             for f in kb.get("Val", set())
                         )
-                        
                         if is_occupied:
-                            # It's a contradiction. Add the fact so the consistency checker 
-                            # catches it, but ABORT FC immediately to prevent a UI glitch.
                             category.add(q_prime)
-                            return kb 
+                            return kb
 
                     category.add(q_prime)
                     new_facts_found = True
 
                     if q_prime.name == "Val":
                         new_val_count += 1
-                        step_index += 1
                         _emit_trace(
                             trace_callback,
                             "assign",
-                            step_index,
+                            _next_step(trace_state),
                             "FC derived Val({}, {}, {})".format(
                                 q_prime.terms[0].name,
                                 q_prime.terms[1].name,
@@ -189,11 +197,10 @@ def fol_fc(kb, rules, should_cancel=None, trace_callback=None):
                     elif q_prime.name == "NotVal":
                         new_not_val_count += 1
 
-        step_index += 1
         _emit_trace(
             trace_callback,
             "progress",
-            step_index,
+            _next_step(trace_state),
             "FC iteration {} finished".format(iteration),
             {
                 "phase": "iteration_done",
@@ -206,8 +213,7 @@ def fol_fc(kb, rules, should_cancel=None, trace_callback=None):
             },
         )
         iteration += 1
-    
-    # print("--- Forward Chaining Exhausted ---")
+
     return kb
 
 i, j, k = Var("i"), Var("j"), Var("k")
@@ -393,23 +399,41 @@ def get_degree(r, c, kb):
            (fact.terms[0].name == r - 1 and fact.terms[1].name == c): degree += 1
     return degree
 
-def solve_with_backtracking(kb, rules, N, depth=0, trace_callback=None, should_cancel=None):
+def solve_with_backtracking(kb, rules, N, depth=0, trace_callback=None, should_cancel=None, trace_state=None):
     """
     Recursively solves the puzzle using Forward Chaining + Backtracking.
     """
     if should_cancel is not None and should_cancel():
         raise RuntimeError("Solve cancelled")
+    if trace_state is None:
+        trace_state = {"step_index": 0}
 
     # Propagate constraints using Forward Chaining
-    kb = fol_fc(kb, rules, should_cancel=should_cancel, trace_callback=trace_callback)
+    kb = fol_fc(kb, rules, should_cancel=should_cancel, trace_callback=trace_callback, trace_state=trace_state)
 
     # Check if the newly propagated KB is valid
     if not is_consistent(kb, N):
+        _emit_trace(
+            trace_callback,
+            "progress",
+            _next_step(trace_state),
+            "Backtrack: contradiction at depth {}".format(depth),
+            {"phase": "dead_end", "depth": depth},
+            board=_board_from_kb(kb, N),
+        )
         return None
 
     # Check if solved (all N*N cells have a value)
     vals = kb.get("Val", set())
     if len(vals) == N * N:
+        _emit_trace(
+            trace_callback,
+            "progress",
+            _next_step(trace_state),
+            "Solved at depth {}".format(depth),
+            {"phase": "solved_node", "depth": depth},
+            board=_board_from_kb(kb, N),
+        )
         return kb
 
     # MRV Heuristic: Find unassigned cell with smallest domain
@@ -435,6 +459,15 @@ def solve_with_backtracking(kb, rules, N, depth=0, trace_callback=None, should_c
                 domain = [v for v in range(1, N + 1) if v not in eliminated]
 
                 if len(domain) == 0:
+                    _emit_trace(
+                        trace_callback,
+                        "progress",
+                        _next_step(trace_state),
+                        "Backtrack: empty domain at ({}, {})".format(r, c),
+                        {"phase": "dead_end", "depth": depth, "row": r - 1, "col": c - 1},
+                        board=_board_from_kb(kb, N),
+                        focus_cell=(r - 1, c - 1),
+                    )
                     return None 
 
                 if len(domain) < best_domain_size:
@@ -452,14 +485,61 @@ def solve_with_backtracking(kb, rules, N, depth=0, trace_callback=None, should_c
         return None
 
     r, c = best_cell
+    _emit_trace(
+        trace_callback,
+        "progress",
+        _next_step(trace_state),
+        "Select cell ({}, {}) with domain {}".format(r, c, best_domain),
+        {
+            "phase": "select_cell",
+            "depth": depth,
+            "row": r - 1,
+            "col": c - 1,
+            "domain": list(best_domain),
+            "domain_size": len(best_domain),
+        },
+        board=_board_from_kb(kb, N),
+        focus_cell=(r - 1, c - 1),
+    )
     for v in best_domain:
         new_kb = {k: set(v_set) for k, v_set in kb.items()}
         
         # Inject our guess as a new Given/Val fact
         add_fact(new_kb, Predicate("Val", [Const(r), Const(c), Const(v)]))
+
+        _emit_trace(
+            trace_callback,
+            "assign",
+            _next_step(trace_state),
+            "Try {} at ({}, {})".format(v, r, c),
+            {
+                "phase": "try_value",
+                "depth": depth,
+                "row": r - 1,
+                "col": c - 1,
+                "value": v,
+            },
+            board=_board_from_kb(new_kb, N),
+            focus_cell=(r - 1, c - 1),
+        )
         
-        result_kb = solve_with_backtracking(new_kb, rules, N, depth + 1, trace_callback=trace_callback, should_cancel=should_cancel)
+        result_kb = solve_with_backtracking(new_kb, rules, N, depth + 1, trace_callback=trace_callback, should_cancel=should_cancel, trace_state=trace_state)
         if result_kb is not None:
+            _emit_trace(
+                trace_callback,
+                "progress",
+                _next_step(trace_state),
+                "Backtrack from {} at ({}, {})".format(v, r, c),
+                {
+                    "phase": "backtrack",
+                    "depth": depth,
+                    "row": r - 1,
+                    "col": c - 1,
+                    "value": v,
+                },
+                board=_board_from_kb(kb, N),
+                focus_cell=(r - 1, c - 1),
+            )
             return result_kb
 
     return None

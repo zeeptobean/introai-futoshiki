@@ -139,7 +139,7 @@ class BaseSolverAdapter(ABC):
                 step_index=int(payload.get("step_index", 0)),
                 board_snapshot=clone_board(payload.get("board")),
                 message=payload.get("message", ""),
-                focus_cell=payload.get("focus_cell"),
+                focus_cell=self._resolve_focus_cell(payload),
                 metadata=payload.get("metadata", {}),
             )
         )
@@ -176,6 +176,22 @@ class BaseSolverAdapter(ABC):
                     {"value": new_val},
                 )
         return step
+    
+    @staticmethod
+    def _resolve_focus_cell(payload: Dict):
+        focus = payload.get("focus_cell")
+        if isinstance(focus, (tuple, list)) and len(focus) == 2:
+            r, c = focus[0], focus[1]
+            if isinstance(r, int) and isinstance(c, int):
+                return (r, c)
+
+        metadata = payload.get("metadata", {}) or {}
+        row = metadata.get("row")
+        col = metadata.get("col")
+        if isinstance(row, int) and isinstance(col, int):
+            return (row, col)
+
+        return None
 
 class FCBacktrackAdapter(BaseSolverAdapter):
     def __init__(self):
@@ -421,10 +437,21 @@ class ForwardChainingAdapter(BaseSolverAdapter):
 
             self._emit_solver_payload(trace_sink, payload_with_board)
 
+        trace_state = {
+            "step_index": 0,
+            "emit_scan_events": bool((config.metadata or {}).get("fc_emit_scan_events", True)),
+        }
+
         start = time.perf_counter()
         with _temporary_input_file(puzzle, symbols["write_input_file"]) as file_path:
             n, kb, rules = load_futoshiki(file_path)
-            kb_final = fol_fc(kb, rules, should_cancel=should_cancel, trace_callback=on_fc_trace)
+            kb_final = fol_fc(
+                kb,
+                rules,
+                should_cancel=should_cancel,
+                trace_callback=on_fc_trace,
+                trace_state=trace_state,
+            )
 
         solved_board = [[0 for _ in range(n)] for _ in range(n)]
         for pred in kb_final.get("Val", set()):

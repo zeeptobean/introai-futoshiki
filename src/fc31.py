@@ -4,17 +4,25 @@ import time
 from myfol import *
 
 
-def _emit_trace(trace_callback, action, step_index, message, metadata=None):
+def _emit_trace(trace_callback, action, step_index, message, metadata=None, board=None, focus_cell=None):
     if trace_callback is None:
         return
-    trace_callback(
-        {
-            "action": action,
-            "step_index": step_index,
-            "message": message,
-            "metadata": metadata or {},
-        }
-    )
+    payload = {
+        "action": action,
+        "step_index": step_index,
+        "message": message,
+        "metadata": metadata or {},
+    }
+    if board is not None:
+        payload["board"] = board
+    if focus_cell is not None:
+        payload["focus_cell"] = focus_cell
+    trace_callback(payload)
+
+
+def _next_step(trace_state):
+    trace_state["step_index"] = int(trace_state.get("step_index", 0)) + 1
+    return trace_state["step_index"]
 
 
 def _theta_to_payload(theta):
@@ -74,21 +82,35 @@ def match_premises(premises, kb, theta, should_cancel=None):
         if theta_new is not None:
             yield from match_premises(rest_premises, kb, theta_new, should_cancel=should_cancel)
 
-def fol_fc(kb, rules, should_cancel=None, trace_callback=None):
-    # print("\n--- Starting Forward Chaining ---")
+def _fact_focus_cell(fact):
+    """Best-effort conversion from Predicate terms to 0-based (row, col)."""
+    try:
+        if fact is None or len(fact.terms) < 2:
+            return None
+        row0 = int(fact.terms[0].name) - 1
+        col0 = int(fact.terms[1].name) - 1
+        if row0 < 0 or col0 < 0:
+            return None
+        return (row0, col0)
+    except Exception:
+        return None
+
+def fol_fc(kb, rules, should_cancel=None, trace_callback=None, trace_state=None):
     new_facts_found = True
     iteration = 1
-    step_index = 0
-    
+    if trace_state is None:
+        trace_state = {"step_index": 0}
+
+    emit_scan_events = bool(trace_state.get("emit_scan_events", True))
+
     while new_facts_found:
         if should_cancel is not None and should_cancel():
             raise RuntimeError("Solve cancelled")
 
-        step_index += 1
         _emit_trace(
             trace_callback,
             "progress",
-            step_index,
+            _next_step(trace_state),
             "FC iteration {} started".format(iteration),
             {
                 "phase": "iteration_started",
@@ -102,51 +124,122 @@ def fol_fc(kb, rules, should_cancel=None, trace_callback=None):
         new_facts_found = False
         new_val_count = 0
         new_not_val_count = 0
-        # print(f"Iteration {iteration} running...")
-        
+
         for rule_idx, rule in enumerate(rules):
             if should_cancel is not None and should_cancel():
                 raise RuntimeError("Solve cancelled")
+
             for theta in match_premises(rule.premises, kb, {}, should_cancel=should_cancel):
                 q_prime = substitute(theta, rule.conclusion)
-                
-                # --- OPTIMIZATION: Dictionary Insertion ---
+                focus_cell = _fact_focus_cell(q_prime)
+
+                # Cell-by-cell "search" animation event, even before insertion.
+                if emit_scan_events and focus_cell is not None:
+                    _emit_trace(
+                        trace_callback,
+                        "progress",
+                        _next_step(trace_state),
+                        "FC consider {}".format(str(q_prime)),
+                        {
+                            "phase": "consider_fact",
+                            "iteration": iteration,
+                            "rule_index": rule_idx,
+                            "fact": str(q_prime),
+                            "theta": _theta_to_payload(theta),
+                        },
+                        focus_cell=focus_cell,
+                    )
+
                 category = kb.setdefault(q_prime.name, set())
-                if q_prime not in category:
-                    category.add(q_prime)
-                    new_facts_found = True
+                if q_prime in category:
+                    continue
 
-                    if q_prime.name == "Val":
-                        new_val_count += 1
-                        step_index += 1
-                        _emit_trace(
-                            trace_callback,
-                            "assign",
-                            step_index,
-                            "FC derived Val({}, {}, {})".format(
-                                q_prime.terms[0].name,
-                                q_prime.terms[1].name,
-                                q_prime.terms[2].name,
-                            ),
-                            {
-                                "phase": "derived_val",
-                                "iteration": iteration,
-                                "rule_index": rule_idx,
-                                "row": q_prime.terms[0].name - 1,
-                                "col": q_prime.terms[1].name - 1,
-                                "value": q_prime.terms[2].name,
-                                "fact": str(q_prime),
-                                "theta": _theta_to_payload(theta),
-                            },
-                        )
-                    elif q_prime.name == "NotVal":
-                        new_not_val_count += 1
+                if q_prime.name == "Val":
+                    r = q_prime.terms[0].name
+                    c = q_prime.terms[1].name
+                    v = q_prime.terms[2].name
+                    is_occupied = any(
+                        f.terms[0].name == r and f.terms[1].name == c and f.terms[2].name != v
+                        for f in kb.get("Val", set())
+                    )
+                    if is_occupied:
+                        # Emit contradiction-like progress so GUI highlights where FC stopped.
+                        if focus_cell is not None:
+                            _emit_trace(
+                                trace_callback,
+                                "progress",
+                                _next_step(trace_state),
+                                "FC conflict at ({}, {}) while deriving {}".format(r, c, v),
+                                {
+                                    "phase": "conflict",
+                                    "iteration": iteration,
+                                    "rule_index": rule_idx,
+                                    "row": r - 1,
+                                    "col": c - 1,
+                                    "value": v,
+                                    "fact": str(q_prime),
+                                },
+                                focus_cell=focus_cell,
+                            )
+                        category.add(q_prime)
+                        return kb
 
-        step_index += 1
+                category.add(q_prime)
+                new_facts_found = True
+
+                if q_prime.name == "Val":
+                    row0 = q_prime.terms[0].name - 1
+                    col0 = q_prime.terms[1].name - 1
+                    new_val_count += 1
+                    _emit_trace(
+                        trace_callback,
+                        "assign",
+                        _next_step(trace_state),
+                        "FC derived Val({}, {}, {})".format(
+                            q_prime.terms[0].name,
+                            q_prime.terms[1].name,
+                            q_prime.terms[2].name,
+                        ),
+                        {
+                            "phase": "derived_val",
+                            "iteration": iteration,
+                            "rule_index": rule_idx,
+                            "row": row0,
+                            "col": col0,
+                            "value": q_prime.terms[2].name,
+                            "fact": str(q_prime),
+                            "theta": _theta_to_payload(theta),
+                        },
+                        focus_cell=(row0, col0),
+                    )
+
+                elif q_prime.name == "NotVal":
+                    row0 = q_prime.terms[0].name - 1
+                    col0 = q_prime.terms[1].name - 1
+                    value = q_prime.terms[2].name
+                    new_not_val_count += 1
+                    _emit_trace(
+                        trace_callback,
+                        "progress",
+                        _next_step(trace_state),
+                        "FC eliminate {} at ({}, {})".format(value, row0 + 1, col0 + 1),
+                        {
+                            "phase": "derived_not_val",
+                            "iteration": iteration,
+                            "rule_index": rule_idx,
+                            "row": row0,
+                            "col": col0,
+                            "value": value,
+                            "fact": str(q_prime),
+                            "theta": _theta_to_payload(theta),
+                        },
+                        focus_cell=(row0, col0),
+                    )
+
         _emit_trace(
             trace_callback,
             "progress",
-            step_index,
+            _next_step(trace_state),
             "FC iteration {} finished".format(iteration),
             {
                 "phase": "iteration_done",
@@ -159,8 +252,7 @@ def fol_fc(kb, rules, should_cancel=None, trace_callback=None):
             },
         )
         iteration += 1
-    
-    # print("--- Forward Chaining Exhausted ---")
+
     return kb
 
 i, j, k = Var("i"), Var("j"), Var("k")
