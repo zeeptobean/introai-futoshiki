@@ -133,6 +133,8 @@ class SolveTabMixin:
 
     def _apply_next_trace_event(self) -> None:
         if self.trace_cursor >= len(self.trace_events):
+            if self.pending_request_mode == "solve" and self.worker_state == "running":
+                return
             self.animation_playing = False
             if self.latest_result is not None:
                 if self.latest_result.status == SolverStatus.SOLVED:

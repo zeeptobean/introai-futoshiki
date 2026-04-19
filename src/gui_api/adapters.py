@@ -60,6 +60,21 @@ def _import_bc_symbols():
         "write_input_file": write_input_file,
     }
 
+def _import_fc_backtrack_symbols():
+    """Import FC+Backtrack modules with run-root fallback."""
+    try:
+        from fcbacktrack import load_futoshiki, solve_with_backtracking
+        from utils import write_input_file
+    except ImportError:  # pragma: no cover
+        from src.fcbacktrack import load_futoshiki, solve_with_backtracking
+        from src.utils import write_input_file
+
+    return {
+        "load_futoshiki": load_futoshiki,
+        "solve_with_backtracking": solve_with_backtracking,
+        "write_input_file": write_input_file,
+    }
+
 
 def _import_auto_symbols():
     """Import AUTO SMT solver symbols with run-root fallback."""
@@ -162,6 +177,113 @@ class BaseSolverAdapter(ABC):
                 )
         return step
 
+class FCBacktrackAdapter(BaseSolverAdapter):
+    def __init__(self):
+        super().__init__(SolverType.FC_BACKTRACK)
+
+    def solve(
+        self,
+        puzzle: PuzzleSpec,
+        config: SolverConfig,
+        trace_sink: Optional[TraceSink] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ) -> SolverResult:
+        symbols = _import_fc_backtrack_symbols()
+        load_futoshiki = symbols["load_futoshiki"]
+        solve_with_backtracking = symbols["solve_with_backtracking"]
+
+        puzzle.validate()
+        step = 0
+        self._emit(trace_sink, TraceAction.STARTED, step, puzzle.board, "FC+Backtrack started")
+        trace_step = 0
+        emitted_assign_count = 0
+        working_board = puzzle.clone_board()
+
+        def on_fc_trace(payload):
+            nonlocal trace_step, emitted_assign_count
+            if trace_sink is None: return
+
+            trace_step = max(trace_step, int(payload.get("step_index", trace_step + 1)))
+            payload_with_board = dict(payload)
+            payload_with_board["step_index"] = trace_step
+
+            if payload_with_board.get("action") == TraceAction.ASSIGN.value:
+                metadata = payload_with_board.get("metadata", {})
+                row, col, value = metadata.get("row"), metadata.get("col"), metadata.get("value")
+                if isinstance(row, int) and isinstance(col, int) and isinstance(value, int):
+                    if 0 <= row < len(working_board) and 0 <= col < len(working_board[row]):
+                        working_board[row][col] = value
+                        payload_with_board["board"] = clone_board(working_board)
+                        payload_with_board["focus_cell"] = (row, col)
+                        emitted_assign_count += 1
+            else:
+                payload_with_board.setdefault("board", clone_board(working_board))
+
+            self._emit_solver_payload(trace_sink, payload_with_board)
+
+        start = time.perf_counter()
+        with _temporary_input_file(puzzle, symbols["write_input_file"]) as file_path:
+            n, kb, rules = load_futoshiki(file_path)
+            kb_final = solve_with_backtracking(kb, rules, n, trace_callback=on_fc_trace, should_cancel=should_cancel)
+
+        elapsed = time.perf_counter() - start
+        
+        if kb_final is None:
+            stats = {"algorithm": "fc_backtrack", "execution_time": elapsed}
+            self._emit(trace_sink, TraceAction.FAILED, trace_step + 1, working_board, "FC+Backtrack found no solution", stats)
+            return SolverResult(status=SolverStatus.UNSAT, solved_board=None, stats=stats)
+
+        solved_board = [[0 for _ in range(n)] for _ in range(n)]
+        for pred in kb_final.get("Val", set()):
+            solved_board[pred.terms[0].name - 1][pred.terms[1].name - 1] = pred.terms[2].name
+
+        stats = {
+            "algorithm": "fc_backtrack",
+            "facts_total": sum(len(v) for v in kb_final.values()),
+            "val_facts": len(kb_final.get("Val", set())),
+            "execution_time": elapsed,
+        }
+
+        zero_count = sum(1 for row in solved_board for cell in row if cell == 0)
+        stats = {
+            "algorithm": "fc_backtrack",
+            "facts_total": sum(len(v) for v in kb_final.values()),
+            "val_facts": len(kb_final.get("Val", set())),
+            "not_val_facts": len(kb_final.get("NotVal", set())),
+            "execution_time": elapsed,
+            "trace_assign_events": emitted_assign_count,
+        }
+
+        if zero_count > 0:
+            self._emit(
+                trace_sink,
+                TraceAction.FAILED,
+                trace_step + 1,
+                solved_board,
+                "FC+Backtrack ended with partial assignment",
+                stats,
+            )
+            return SolverResult(
+                status=SolverStatus.UNSAT,
+                solved_board=solved_board,
+                stats=stats,
+                message="No complete assignment derived",
+            )
+        else:
+            self._emit(
+                trace_sink,
+                TraceAction.SOLVED,
+                trace_step + 1,
+                solved_board,
+                "FC+Backtrack solved puzzle",
+                stats,
+            )
+            return SolverResult(
+                status=SolverStatus.SOLVED,
+                solved_board=solved_board,
+                stats=stats,
+                message="Solved",
+            )
 
 class AStarAdapter(BaseSolverAdapter):
     def __init__(self):
@@ -522,6 +644,8 @@ def build_adapter(solver_type: SolverType) -> BaseSolverAdapter:
         return ForwardChainingAdapter()
     if solver_type == SolverType.BACKWARD_CHAINING:
         return BackwardChainingAdapter()
+    if solver_type == SolverType.FC_BACKTRACK:
+        return FCBacktrackAdapter()
     if solver_type == SolverType.AUTO:
         return AutoAdapter()
     raise ValueError("Unsupported solver type: {}".format(solver_type))

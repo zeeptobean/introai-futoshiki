@@ -12,6 +12,7 @@ class SolverType(str, Enum):
     BACKTRACK = "backtrack"
     FORWARD_CHAINING = "forward_chaining"
     BACKWARD_CHAINING = "backward_chaining"
+    FC_BACKTRACK = "fc_backtrack"
     AUTO = "auto"
 
 

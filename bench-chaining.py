@@ -21,6 +21,7 @@ for p in (str(ROOT_DIR), str(SRC_DIR)):
 from src.auto import load_and_solve_futoshiki
 from src.fc31 import fol_fc, load_futoshiki as load_fc_futoshiki
 from src.bc3 import fol_bc_and, load_and_solve_futoshiki as load_bc_futoshiki, subst
+from src.fcbacktrack import solve_with_backtracking, load_futoshiki as load_fcbt_futoshiki
 
 
 INPUT_NAME_PATTERN = re.compile(r"input-(\d+)\.txt$")
@@ -161,6 +162,26 @@ def _run_bc_once(input_path: str) -> Tuple[Optional[List[List[int]]], float, flo
     peak_kb = peak_bytes / BYTES_PER_KB
     bc_board = _extract_bc_board(solution_theta, variables, size)
     return bc_board, elapsed, peak_kb
+
+def _run_fcbt_once(input_path: str) -> Tuple[Optional[List[List[int]]], float, float]:
+    """
+    Run FC+BT (no Z3 time included).
+    Returns: (board_or_none, elapsed_seconds, peak_memory_kb)
+    """
+    n, kb, rules = load_fcbt_futoshiki(input_path)
+
+    tracemalloc.start()
+    t0 = time.perf_counter()
+    try:
+        final_kb = solve_with_backtracking(kb, rules, n)
+    finally:
+        elapsed = time.perf_counter() - t0
+        _, peak_bytes = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+    peak_kb = peak_bytes / BYTES_PER_KB
+    fc_board = _extract_fc_board(final_kb, n)
+    return fc_board, elapsed, peak_kb
 
 
 def _run_and_record(

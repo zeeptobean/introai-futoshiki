@@ -37,6 +37,7 @@ ALGO_OPTIONS = [
     {"label": "A* unassigned", "solver": SolverType.ASTAR, "heuristic": "unassigned"},
     {"label": "Backtracking (MRV + AC3)", "solver": SolverType.BACKTRACK, "heuristic": None},
     {"label": "Forward chaining (fc31)", "solver": SolverType.FORWARD_CHAINING, "heuristic": None},
+    {"label": "FC + Backtracking", "solver": SolverType.FC_BACKTRACK, "heuristic": None},
     {"label": "Backward chaining (bc3)", "solver": SolverType.BACKWARD_CHAINING, "heuristic": None},
 ]
 
