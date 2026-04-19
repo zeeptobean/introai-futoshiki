@@ -7,7 +7,7 @@ import pygame
 from gui_api import SolverStatus
 
 SPEED_MIN = 0.25
-SPEED_MAX = 20.0
+SPEED_MAX = 50.0
 
 
 class SolveTabMixin:
@@ -83,6 +83,7 @@ class SolveTabMixin:
         self.algo_dropdown_open = False
         self.input_dropdown_open = False
         self._last_anim_tick = time.time()
+        self._anim_event_accum = 0.0
 
         config = self._build_selected_solver_config()
         self.worker.submit_solve(self._clone_puzzle(), config)
@@ -118,6 +119,7 @@ class SolveTabMixin:
         self.play_completed = False
         # Keep worker and pending solve untouched; reset only clears animation surface state.
         self._last_anim_tick = time.time()
+        self._anim_event_accum = 0.0
         self.status_text = "SOLVE view reset. Trace preserved."
 
     def _update_animation(self) -> None:
@@ -125,16 +127,33 @@ class SolveTabMixin:
             return
         if self.scene != "SOLVE":
             return
-        interval = 1.0 / max(0.1, self.animation_speed)
-        if time.time() - self._last_anim_tick < interval:
-            return
-        self._last_anim_tick = time.time()
-        self._apply_next_trace_event()
 
-    def _apply_next_trace_event(self) -> None:
+        now = time.time()
+        elapsed = now - self._last_anim_tick
+        if elapsed <= 0:
+            return
+        self._last_anim_tick = now
+
+        speed = max(0.1, self.animation_speed)  # events per second
+        self._anim_event_accum = getattr(self, "_anim_event_accum", 0.0) + (elapsed * speed)
+
+        budget = int(self._anim_event_accum)
+        if budget <= 0:
+            return
+
+        self._anim_event_accum -= budget
+        self._apply_next_trace_events(min(budget, 240))
+    
+    def _apply_next_trace_events(self, budget: int) -> None:
+        for _ in range(max(1, budget)):
+            if not self._apply_next_trace_event():
+                break
+
+    def _apply_next_trace_event(self) -> bool:
         if self.trace_cursor >= len(self.trace_events):
             if self.pending_request_mode == "solve" and self.worker_state == "running":
-                return
+                return False
+
             self.animation_playing = False
             if self.latest_result is not None:
                 if self.latest_result.status == SolverStatus.SOLVED:
@@ -143,17 +162,22 @@ class SolveTabMixin:
                 elif self.latest_result.status == SolverStatus.UNSAT:
                     self.solve_completed = False
                     self.solve_no_solution = True
-            return
+            return False
 
-        prev_board = [row[:] for row in self.display_board]
         event = self.trace_events[self.trace_cursor]
         self.trace_cursor += 1
+
+        # Avoid extra deep copy in GUI path; adapter already snapshots.
         if event.board_snapshot is not None:
-            self.display_board = [row[:] for row in event.board_snapshot]
+            self.display_board = event.board_snapshot
 
         focus = event.focus_cell
-        if focus is None and event.board_snapshot is not None:
-            focus = self._infer_focus_cell(prev_board, event.board_snapshot)
+        if focus is None:
+            md = event.metadata if isinstance(event.metadata, dict) else {}
+            row = md.get("row")
+            col = md.get("col")
+            if isinstance(row, int) and isinstance(col, int):
+                focus = (row, col)
         self.animation_focus_cell = focus
 
         action = getattr(event.action, "value", str(event.action))
@@ -161,6 +185,8 @@ class SolveTabMixin:
 
         if event.message:
             self.status_text = event.message
+
+        return True
 
     @staticmethod
     def _infer_focus_cell(before: List[List[int]], after: List[List[int]]) -> Optional[Tuple[int, int]]:

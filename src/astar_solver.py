@@ -90,7 +90,7 @@ class AStarSolver:
             trace_callback({
                 "action": action,
                 "step_index": trace_step,
-                "board": [row[:] for row in board] if board is not None else None,
+                "board": board if board is not None else None,
                 "focus_cell": focus_cell,
                 "message": message,
                 "metadata": metadata or {},

@@ -20,7 +20,7 @@ from gui_api import PuzzleSpec, SolverConfig, SolverResult, SolverStatus, Solver
 from gui_api.puzzle_io import load_puzzle_from_file
 from gui_tabs.menu_tab import MenuTabMixin
 from gui_tabs.play_tab import PlayTabMixin
-from gui_tabs.solve_tab import SolveTabMixin
+from gui_tabs.solve_tab import SolveTabMixin, SPEED_MIN as SOLVE_SPEED_MIN, SPEED_MAX as SOLVE_SPEED_MAX
 
 try:
     from futoshiki import Futoshiki
@@ -750,7 +750,7 @@ class FutoshikiGUI(PlayTabMixin, SolveTabMixin, MenuTabMixin):
         speed_slider = None
         if self.scene == "SOLVE":
             track = pygame.Rect(panel_rect.left + 16, y + 34, panel_rect.width - 32, 8)
-            value_ratio = (self.animation_speed - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)
+            value_ratio = (self.animation_speed - SOLVE_SPEED_MIN) / (SOLVE_SPEED_MAX - SOLVE_SPEED_MIN)
             value_ratio = max(0.0, min(1.0, value_ratio))
             thumb_x = int(track.left + value_ratio * track.width)
             thumb = pygame.Rect(thumb_x - 8, track.centery - 8, 16, 16)
