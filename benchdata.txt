@@ -1,0 +1,51 @@
+2026-04-19 10:26:43 | INFO | run_end | algo=fc_mrv | input=input-01.txt | time=0.070098 | memory_kb=114.976562 | iscorrect=true | error=none
+2026-04-19 10:26:43 | INFO | run_end | algo=fc_mrv | input=input-02.txt | time=0.260486 | memory_kb=154.679688 | iscorrect=true | error=none
+2026-04-19 10:26:44 | INFO | run_end | algo=fc_mrv | input=input-03.txt | time=0.269665 | memory_kb=151.601562 | iscorrect=true | error=none
+2026-04-19 10:26:44 | INFO | run_end | algo=fc_mrv | input=input-04.txt | time=0.134284 | memory_kb=150.898438 | iscorrect=true | error=none
+2026-04-19 10:26:44 | INFO | run_end | algo=fc_mrv | input=input-05.txt | time=0.227408 | memory_kb=291.710938 | iscorrect=true | error=none
+2026-04-19 10:26:44 | INFO | run_end | algo=fc_mrv | input=input-06.txt | time=0.340140 | memory_kb=353.156250 | iscorrect=true | error=none
+2026-04-19 10:26:45 | INFO | run_end | algo=fc_mrv | input=input-07.txt | time=0.757168 | memory_kb=378.765625 | iscorrect=true | error=none
+2026-04-19 10:26:47 | INFO | run_end | algo=fc_mrv | input=input-08.txt | time=2.242190 | memory_kb=379.312500 | iscorrect=true | error=none
+2026-04-19 10:26:48 | INFO | run_end | algo=fc_mrv | input=input-09.txt | time=0.544216 | memory_kb=932.992188 | iscorrect=true | error=none
+2026-04-19 10:26:49 | INFO | run_end | algo=fc_mrv | input=input-10.txt | time=1.453563 | memory_kb=1064.359375 | iscorrect=true | error=none
+2026-04-19 10:30:49 | INFO | run_end | algo=fc_mrv | input=input-11.txt | time=239.964666 | memory_kb=1165.414062 | iscorrect=true | error=none
+2026-04-19 10:31:01 | INFO | run_end | algo=fc_mrv | input=input-12.txt | time=11.807383 | memory_kb=1096.820312 | iscorrect=true | error=none
+2026-04-19 10:31:02 | INFO | run_end | algo=fc_mrv | input=input-13.txt | time=1.159081 | memory_kb=1819.328125 | iscorrect=true | error=none
+2026-04-19 10:31:13 | INFO | run_end | algo=fc_mrv | input=input-14.txt | time=10.130980 | memory_kb=2216.140625 | iscorrect=true | error=none
+2026-04-19 10:54:44 | INFO | run_end | algo=fc_mrv | input=input-15.txt | time=1410.561842 | memory_kb=2381.109375 | iscorrect=true | error=none
+2026-04-19 10:59:08 | INFO | run_end | algo=fc_mrv | input=input-16.txt | time=263.734780 | memory_kb=2316.750000 | iscorrect=true | error=none
+2026-04-19 10:59:12 | INFO | run_end | algo=fc_mrv | input=input-17.txt | time=4.651428 | memory_kb=5302.531250 | iscorrect=true | error=none
+
+2026-04-19 14:18:16 | INFO | run_end | algo=fc | input=input-01.txt | time=1.154156 | memory_kb=22.181641 | iscorrect=true | error=none
+2026-04-19 14:18:17 | INFO | run_end | algo=fc | input=input-02.txt | time=0.251085 | memory_kb=11.767578 | iscorrect=false | error=none
+2026-04-19 14:18:17 | INFO | run_end | algo=fc | input=input-03.txt | time=0.200024 | memory_kb=8.945312 | iscorrect=false | error=none
+2026-04-19 14:18:17 | INFO | run_end | algo=fc | input=input-04.txt | time=0.269484 | memory_kb=11.486328 | iscorrect=false | error=none
+2026-04-19 14:18:47 | INFO | run_end | algo=fc | input=input-05.txt | time=29.694914 | memory_kb=41.125977 | iscorrect=true | error=none
+2026-04-19 14:18:52 | INFO | run_end | algo=fc | input=input-06.txt | time=5.570018 | memory_kb=21.149414 | iscorrect=false | error=none
+2026-04-19 14:18:56 | INFO | run_end | algo=fc | input=input-07.txt | time=3.818217 | memory_kb=11.523438 | iscorrect=false | error=none
+2026-04-19 14:19:01 | INFO | run_end | algo=fc | input=input-08.txt | time=4.476388 | memory_kb=17.836914 | iscorrect=false | error=none
+2026-04-19 14:33:02 | INFO | run_end | algo=fc | input=input-09.txt | time=840.800167 | memory_kb=57.757812 | iscorrect=true | error=none
+2026-04-19 14:34:45 | INFO | run_end | algo=fc | input=input-10.txt | time=103.293259 | memory_kb=33.945312 | iscorrect=false | error=none
+2026-04-19 14:36:11 | INFO | run_end | algo=fc | input=input-11.txt | time=85.755307 | memory_kb=21.375000 | iscorrect=false | error=none
+2026-04-19 14:37:48 | INFO | run_end | algo=fc | input=input-12.txt | time=97.033431 | memory_kb=25.640625 | iscorrect=false | error=none
+2026-04-19 21:40:42 | INFO | run_end | algo=fc | input=input-13.txt | time=25374.236867 | memory_kb=80.358398 | iscorrect=true | error=none
+2026-04-19 23:10:07 | INFO | run_end | algo=fc | input=input-14.txt | time=5364.397119 | memory_kb=51.327148 | iscorrect=false | error=none
+2026-04-19 23:45:09 | INFO | run_end | algo=fc | input=input-15.txt | time=2101.935017 | memory_kb=25.241211 | iscorrect=false | error=none
+2026-04-20 00:47:19 | INFO | run_end | algo=fc | input=input-16.txt | time=3729.893218 | memory_kb=44.538086 | iscorrect=false | error=none
+
+
+
+2026-04-17 06:38:26 | INFO | run_end | algo=bc | input=input-01.txt | time=0.034407 | memory_kb=159.911133 | iscorrect=true | error=none
+2026-04-17 06:38:26 | INFO | run_end | algo=bc | input=input-02.txt | time=0.082921 | memory_kb=160.511719 | iscorrect=true | error=none
+2026-04-17 06:38:27 | INFO | run_end | algo=bc | input=input-03.txt | time=0.666093 | memory_kb=180.717773 | iscorrect=true | error=none
+2026-04-17 06:38:28 | INFO | run_end | algo=bc | input=input-04.txt | time=0.193255 | memory_kb=168.008789 | iscorrect=true | error=none
+2026-04-17 06:38:59 | INFO | run_end | algo=bc | input=input-05.txt | time=1.984661 | memory_kb=284.090820 | iscorrect=true | error=none
+2026-04-17 06:39:18 | INFO | run_end | algo=bc | input=input-06.txt | time=13.939341 | memory_kb=323.880859 | iscorrect=true | error=none
+2026-04-17 06:39:29 | INFO | run_end | algo=bc | input=input-07.txt | time=6.783807 | memory_kb=339.041992 | iscorrect=true | error=none
+2026-04-17 06:40:07 | INFO | run_end | algo=bc | input=input-08.txt | time=33.871689 | memory_kb=352.731445 | iscorrect=true | error=none
+2026-04-17 06:56:38 | INFO | run_end | algo=bc | input=input-09.txt | time=161.932718 | memory_kb=555.444336 | iscorrect=true | error=none
+2026-04-17 08:50:35 | INFO | run_end | algo=bc | input=input-10.txt | time=6739.685256 | memory_kb=593.024414 | iscorrect=true | error=none
+2026-04-17 11:04:14 | INFO | run_end | algo=bc | input=input-11.txt | time=7930.601374 | memory_kb=639.472656 | iscorrect=true | error=none
+2026-04-17 13:43:38 | INFO | run_end | algo=bc | input=input-12.txt | time=7152.083018 | memory_kb=637.474609 | iscorrect=true | error=none
+2026-04-17 12:26:12 | INFO | run_end | algo=bc | input=input-13.txt | time=2379.669180 | memory_kb=978.216797 | iscorrect=true | error=none
+2026-04-17 19:32:31 | INFO | run_end | algo=bc | input=input-15.txt | time=13269.340576 | memory_kb=1052.908203 | iscorrect=true | error=none
