@@ -1,37 +1,38 @@
+import argparse
+import sys
+
 from pysat.solvers import Glucose3
 
-def parse_futoshiki_file(filepath):
+from utils import print_futoshiki2
+
+def _parse_futoshiki_file(filepath):
     with open(filepath, 'r') as f:
         lines = f.readlines()
 
-    # 1. Clean the data: ignore comments and empty lines
     cleaned_lines = []
     for line in lines:
-        line = line.split('#')[0].strip() # Remove comments and whitespace
+        line = line.split('#')[0].strip()
         if line:
             cleaned_lines.append(line)
 
-    # 2. Extract N
     N = int(cleaned_lines[0])
     current_line_idx = 1
 
-    # Data structures to store the "Knowledge Base" (using 1-based indexing)
     givens = []       # Format: (i, j, v)
     less_h = []       # Format: (i, j) meaning Cell(i, j) < Cell(i, j+1)
     greater_h = []    # Format: (i, j) meaning Cell(i, j) > Cell(i, j+1)
     less_v = []       # Format: (i, j) meaning Cell(i, j) < Cell(i+1, j)
     greater_v = []    # Format: (i, j) meaning Cell(i, j) > Cell(i+1, j)
 
-    # 3. Parse Grid Data (N lines)
+    # grid data
     for i in range(N):
-        # Split by comma and convert to integers
         row_values = list(map(int, cleaned_lines[current_line_idx].split(',')))
         for j in range(N):
             if row_values[j] != 0:
                 givens.append((i + 1, j + 1, row_values[j]))
         current_line_idx += 1
 
-    # 4. Parse Horizontal Constraints (N lines, N-1 values per line)
+    # horizontal constraints
     for i in range(N):
         row_values = list(map(int, cleaned_lines[current_line_idx].split(',')))
         for j in range(N - 1):
@@ -41,7 +42,7 @@ def parse_futoshiki_file(filepath):
                 greater_h.append((i + 1, j + 1))
         current_line_idx += 1
 
-    # 5. Parse Vertical Constraints (N-1 lines, N values per line)
+    # vertical constraints
     for i in range(N - 1):
         row_values = list(map(int, cleaned_lines[current_line_idx].split(',')))
         for j in range(N):
@@ -161,12 +162,10 @@ def print_readable_clauses(clauses, N, limit: int | None = 30):
     Translates CNF integer clauses back into readable English.
     'limit' stops it from flooding your console with thousands of lines.
     """
-    # 1. Build a reverse-lookup dictionary
     id_to_string = {}
     for i in range(1, N + 1):
         for j in range(1, N + 1):
             for v in range(1, N + 1):
-                # This is the exact same formula from your generate_cnf_kb function
                 var_id = (i - 1) * N * N + (j - 1) * N + v
                 id_to_string[var_id] = f"Cell({i},{j}) is {v}"
 
@@ -177,64 +176,82 @@ def print_readable_clauses(clauses, N, limit: int | None = 30):
         readable_clause = []
         for lit in clause:
             if lit > 0:
-                # Positive number
                 readable_clause.append(id_to_string[lit])
             else:
-                # Negative number (NOT)
                 readable_clause.append("NOT " + id_to_string[abs(lit)])
         
-        # Join the parts of the clause with " OR "
         print(" OR ".join(readable_clause))
 
-def print_solution(model, N):
-    """
-    Decodes the PySAT model and prints the solved N x N grid in a basic format.
-    """
-    # Create an empty N x N grid
-    grid = [[0 for _ in range(N)] for _ in range(N)]
+def _extract_solution(model, N):
+    """Extract grid and constraint matrices from SAT solver model.
     
-    # Filter for only the True variables (positive integers)
-    true_vars = [val for val in model if val > 0]
+    Args:
+        model: List of integers from solver (positive = true, negative = false).
+        N: Board size.
     
-    for val in true_vars:
-        # Reverse the math from var(i, j, v) to get i, j, v back
-        val -= 1
-        v = (val % N) + 1
-        j = ((val // N) % N) + 1
-        i = (val // (N * N)) + 1
-        
-        # Place the value on the grid (converting back to 0-based indexing)
-        grid[i - 1][j - 1] = v
-        
-    # Print the grid in a basic format
-    for row in grid:
-        print(" ".join(str(x) for x in row))
+    Returns:
+        Tuple of (grid, horiz_constraints, vert_constraints).
+    """
+    def var(i, j, v):
+        return (i - 1) * N * N + (j - 1) * N + v
+    
+    grid = [[0] * N for _ in range(N)]
+    horiz = [[0] * (N - 1) for _ in range(N)]
+    vert = [[0] * N for _ in range(N - 1)]
+    
+    # Extract grid values from model
+    for i in range(1, N + 1):
+        for j in range(1, N + 1):
+            for v in range(1, N + 1):
+                if model[var(i, j, v) - 1] > 0:
+                    grid[i - 1][j - 1] = v
+                    break
+    
+    return grid, horiz, vert
 
 if __name__ == "__main__":
-    N, givens, less_h, greater_h, less_v, greater_v = parse_futoshiki_file('Inputs/input-01.txt')
+    parser = argparse.ArgumentParser(description='Solve Futoshiki puzzles using CNF and SAT solver')
+    parser.add_argument('input', help='Input puzzle file path')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Print CNF clauses')
+    parser.add_argument('--limit', type=int, default=30, help='Max clauses to print in verbose mode (default: 30)')
+    parser.add_argument('--all', action='store_true', help='Print all clauses (ignores --clause-limit)')
 
-    # print(f"Grid Size N: {N}")
-    # print(f"Givens: {givens}")
-    # print(f"Less Horizontal: {less_h}")
-    # print(f"Greater Horizontal: {greater_h}")
-    # print(f"Less Vertical: {less_v}")
-    # print(f"Greater Vertical: {greater_v}")
-
-    clauses = generate_cnf_kb(N, givens, less_h, greater_h, less_v, greater_v)
-    print_readable_clauses(clauses, N)
-    exit(0)
-
-    with Glucose3() as solver:
-        # Add all clauses to the solver
-        for clause in clauses:
-            solver.add_clause(clause)
-            
-        print("Solving...")
+    args = parser.parse_args()
+    
+    try:
+        N, givens, less_h, greater_h, less_v, greater_v = _parse_futoshiki_file(args.input)
         
-        # 4. Ask the solver for an answer
-        if solver.solve():
-            print("\nSOLUTION FOUND!\n")
-            model = solver.get_model()
-            print_solution(model, N)
-        else:
-            print("\nUNSATISFIABLE: No valid solution exists for this board ruleset.")
+        if args.verbose:
+            print(f"Grid Size N: {N}")
+            print(f"Givens: {givens}")
+            print(f"Less Horizontal: {less_h}")
+            print(f"Greater Horizontal: {greater_h}")
+            print(f"Less Vertical: {less_v}")
+            print(f"Greater Vertical: {greater_v}\n")
+        
+        clauses = generate_cnf_kb(N, givens, less_h, greater_h, less_v, greater_v)
+        
+        if args.verbose:
+            clause_limit = None if args.all else args.limit
+            print_readable_clauses(clauses, N, clause_limit)
+            print()
+        
+        with Glucose3() as solver:
+            for clause in clauses:
+                solver.add_clause(clause)
+            
+            print("Solving...")
+            
+            if solver.solve():
+                model = solver.get_model()
+                grid, horiz, vert = _extract_solution(model, N)
+                print_futoshiki2(grid, horiz, vert)
+            else:
+                print("\nUNSATISFIABLE: No valid solution exists for this board ruleset.")
+    
+    except FileNotFoundError:
+        print(f"Error: File '{args.input}' not found", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
