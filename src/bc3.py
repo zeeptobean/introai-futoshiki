@@ -454,29 +454,27 @@ def load_and_solve_futoshiki(file_name: str) -> tuple[list[Rule], list[Predicate
 
     return kb, query_goals, variables, size
 
-def main():
+def bc_solve(input_file: str) -> tuple[list[list[int]] | None, float]:
     time_start = time.perf_counter()
+    kb, query_goals, variables, size = load_and_solve_futoshiki(input_file)
     
-    kb, query_goals, variables, size = load_and_solve_futoshiki("input-01.txt")
-    
-    solutions_found = 0
-    for solution in fol_bc_and(kb, query_goals, {}):
-        solutions_found += 1
-        print(f"\nSolution {solutions_found}:")
-        
-        # Structure the flat output back into a grid map
-        grid = {}
+    solution = None
+    for theta in fol_bc_and(kb, query_goals, {}):
+        solution = theta
+        break
+
+    time_taken = time.perf_counter() - time_start
+
+    if solution is not None:
+        grid = [[0 for _ in range(size)] for _ in range(size)]
         for v in variables:
-            grid[v.name] = subst(solution, v).name
-            
-        for r in range(1, size + 1):
-            row = [grid[f"v_{r}_{c}"] for c in range(1, size + 1)]
-            print("  " + " ".join(map(str, row)))
-            
-        break # Removes this line to generate ALL possible solutions.
-
-    time_running = time.perf_counter() - time_start
-    print(f"\nTotal time taken: {time_running:.4f} seconds")
-
-if __name__ == "__main__":
-    main()
+            cell_info = _decode_cell_var_name(v.name)
+            if cell_info is not None:
+                row, col = cell_info
+                resolved_value = subst(solution, v)
+                if isinstance(resolved_value, Const):
+                    grid[row][col] = int(resolved_value.name)
+        return grid, time_taken
+    else:
+        return None, time_taken
+    

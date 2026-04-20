@@ -293,3 +293,83 @@ def batch_write(puzzles: Sequence, output_dir: str = "Inputs") -> None:
 
         filepath = os.path.join(output_dir, f"input-{idx:02d}.txt")
         write_input_file(filepath, n, board, constraints)
+
+def parse_futoshiki2(filepath: str) -> tuple[list[list[int]], list[list[int]], list[list[int]]]:
+    """
+    Returns:
+        tuple containing:
+        - grid
+        - horiz_constraints
+        - vert_constraints
+    """
+    with open(filepath, 'r') as f:
+        lines = f.readlines()
+
+    clean_lines = []
+    for line in lines:
+        line = line.split('#')[0].strip()
+        if line:
+            clean_lines.append(line)
+
+    if ',' not in clean_lines[0]:
+        N = int(clean_lines[0])
+        clean_lines = clean_lines[1:]
+    else:
+        N = len(clean_lines[0].split(','))
+
+    grid = []
+    for i in range(N):
+        row = [int(val.strip()) for val in clean_lines[i].split(',')]
+        grid.append(row)
+
+    horiz_constraints = []
+    for i in range(N):
+        row = [int(val.strip()) for val in clean_lines[N + i].split(',')]
+        horiz_constraints.append(row)
+
+    vert_constraints = []
+    for i in range(N - 1):
+        row = [int(val.strip()) for val in clean_lines[2 * N + i].split(',')]
+        vert_constraints.append(row)
+
+    return grid, horiz_constraints, vert_constraints
+
+def print_futoshiki2(grid: list[list[int]], horiz: list[list[int]], vert: list[list[int]]):
+    """
+    Prints the Futoshiki board nicely
+    Use '<', '>', '^', and 'v' to represent constraints.
+    """
+    N = len(grid)
+    width = 4 * N - 3
+    border = "+" + "-" * (width + 2) + "+"
+    
+    print(border)
+    for r in range(N):
+        row_str = ""
+        for c in range(N):
+            val = grid[r][c]
+            row_str += str(val)
+            
+            if c < N - 1:
+                if horiz[r][c] == 1:
+                    row_str += " < "
+                elif horiz[r][c] == -1:
+                    row_str += " > "
+                else:
+                    row_str += "   "
+        print(f"| {row_str} |")
+
+        if r < N - 1:
+            vert_str = ""
+            for c in range(N):
+                if vert[r][c] == 1:
+                    vert_str += "^"
+                elif vert[r][c] == -1:
+                    vert_str += "v"
+                else:
+                    vert_str += " "
+                
+                if c < N - 1:
+                    vert_str += "   "
+            print(f"| {vert_str} |")
+    print(border)

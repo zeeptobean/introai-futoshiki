@@ -567,26 +567,22 @@ def load_futoshiki(file_name: str):
     ]
 
     return N, kb, rules
-    
-def mainfunc2():
-    n, kb, rules = load_futoshiki("Inputs/input-10.txt")
+
+def fc_solve(file_name: str) -> tuple[list[list[int]], float]:
+    n, kb, rules = load_futoshiki(file_name)
     print(f"Loaded Futoshiki puzzle of size {n}x{n} with {sum(len(v) for v in kb.values())} initial facts.")
     time_start = time.perf_counter()
     final_kb = fol_fc(kb, rules)
     time_running = time.perf_counter() - time_start
+
+    # Extract solution from final_kb
+    solution = [[0 for _ in range(n)] for _ in range(n)]
     val_facts = final_kb.get("Val", set())
-    not_val_facts = final_kb.get("NotVal", set())
+    for fact in val_facts:
+        i = int(fact.terms[0].name) - 1
+        j = int(fact.terms[1].name) - 1
+        v = int(fact.terms[2].name)
+        solution[i][j] = v
 
-    print("\n--- Summary of Deduced Values ---")
-    vals = sorted(list(val_facts), key=lambda x: (x.terms[0].name, x.terms[1].name))
-    for val in vals:
-        print(f"Cell ({val.terms[0]}, {val.terms[1]}) = {val.terms[2]}")
-
-    print(f"\nTotal time taken: {time_running:.4f} seconds")
-    # print("\n--- Summary of Eliminated Possibilities ---")
-    # print(f"Total eliminated choices: {len(not_val_facts)}")
-
-
-if __name__ == "__main__":
-    mainfunc2()
+    return solution, time_running
     

@@ -158,3 +158,75 @@ class Futoshiki:
                 return False, f"clue_violated({r},{c}={v})"
 
         return True, None
+    
+    def _build_constraint_grids(self):
+        """
+        Build horizontal/vertical constraint matrices from self.constraints.
+
+        h[r][c] is relation between (r,c) and (r,c+1):
+            1  => left < right
+        -1  => left > right
+            0  => no constraint
+
+        v[r][c] is relation between (r,c) and (r+1,c):
+            1  => top < bottom
+        -1  => top > bottom
+            0  => no constraint
+        """
+        n = self.n
+        h = [[0] * (n - 1) for _ in range(n)]
+        v = [[0] * n for _ in range(n - 1)]
+
+        for (r1, c1), (r2, c2) in self.constraints:
+            if r1 == r2 and abs(c1 - c2) == 1:
+                left_col = min(c1, c2)
+                h[r1][left_col] = 1 if c1 < c2 else -1
+            elif c1 == c2 and abs(r1 - r2) == 1:
+                top_row = min(r1, r2)
+                v[top_row][c1] = 1 if r1 < r2 else -1
+
+        return h, v
+
+    def __repr__(self):
+        grid = self.board
+        n = self.n
+        h, v = self._build_constraint_grids()
+
+        width = 4 * n - 3
+        border = "+" + "-" * (width + 2) + "+"
+
+        lines = [border]
+
+        for r in range(n):
+            row_str = ""
+            for c in range(n):
+                val = grid[r][c]
+                row_str += str(val)
+
+                if c < n - 1:
+                    if h[r][c] == 1:
+                        row_str += " < "
+                    elif h[r][c] == -1:
+                        row_str += " > "
+                    else:
+                        row_str += "   "
+
+            lines.append("| " + row_str + " |")
+
+            if r < n - 1:
+                vert_str = ""
+                for c in range(n):
+                    if v[r][c] == 1:
+                        vert_str += "^"
+                    elif v[r][c] == -1:
+                        vert_str += "v"
+                    else:
+                        vert_str += " "
+
+                    if c < n - 1:
+                        vert_str += "   "
+
+                lines.append("| " + vert_str + " |")
+
+        lines.append(border)
+        return "\n".join(lines)

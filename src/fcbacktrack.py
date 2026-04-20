@@ -694,6 +694,28 @@ def load_futoshiki(file_name: str):
     ]
 
     return N, kb, rules
+
+def fc_mrv_solve(file_name: str) -> tuple[list[list[int]] | None, float]:
+    n, kb, rules = load_futoshiki(file_name)
+    print(f"Loaded Futoshiki puzzle of size {n}x{n} with {sum(len(v) for v in kb.values())} initial facts.")
+    time_start = time.perf_counter()
+    final_kb = solve_with_backtracking(kb, rules, n)
+    time_running = time.perf_counter() - time_start
+
+    if final_kb is None:
+        return None, time_running
+
+    # Extract solution from final_kb
+    solution = [[0 for _ in range(n)] for _ in range(n)]
+    val_facts = final_kb.get("Val", set())
+    for fact in val_facts:
+        i = int(fact.terms[0].name) - 1
+        j = int(fact.terms[1].name) - 1
+        v = int(fact.terms[2].name)
+        solution[i][j] = v
+
+    return solution, time_running
+    
     
 def mainfunc2():
     n, kb, rules = load_futoshiki("Inputs/input-12.txt")

@@ -211,7 +211,7 @@ def print_solution(model, N):
         print(" ".join(str(x) for x in row))
 
 if __name__ == "__main__":
-    N, givens, less_h, greater_h, less_v, greater_v = parse_futoshiki_file('puzzle.txt')
+    N, givens, less_h, greater_h, less_v, greater_v = parse_futoshiki_file('Inputs/input-01.txt')
 
     # print(f"Grid Size N: {N}")
     # print(f"Givens: {givens}")

@@ -140,22 +140,3 @@ def load_and_solve_futoshiki(file_name: str, timeout_ms=None) -> Optional[List[L
     """File-based helper that returns solved board for scripting/testing."""
     N, board, constraints = _parse_input_file(file_name)
     return solve_puzzle_spec(N, board, constraints, timeout_ms=timeout_ms)
-
-
-def _print_board(board):
-    for row in board:
-        print(" ".join(str(v) for v in row))
-
-
-# === Example Execution ===
-if __name__ == "__main__":
-    start_time = time.perf_counter()
-    solved = load_and_solve_futoshiki("Inputs/input-18.txt")
-    time_taken = time.perf_counter() - start_time
-
-    if solved is None:
-        print("\nUnsatisfiable puzzle.")
-    else:
-        print("\n--- Solved ---")
-        _print_board(solved)
-    print("\nTotal time taken: {:.4f} seconds".format(time_taken))
