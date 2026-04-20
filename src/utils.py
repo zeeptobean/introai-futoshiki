@@ -334,7 +334,7 @@ def parse_futoshiki2(filepath: str) -> tuple[list[list[int]], list[list[int]], l
 
     return grid, horiz_constraints, vert_constraints
 
-def print_futoshiki2(grid: list[list[int]], horiz: list[list[int]], vert: list[list[int]]):
+def print_futoshiki2(grid: list[list[int]], horiz: list[list[int]], vert: list[list[int]], has_border: bool = True):
     """
     Prints the Futoshiki board nicely
     Use '<', '>', '^', and 'v' to represent constraints.
@@ -343,7 +343,8 @@ def print_futoshiki2(grid: list[list[int]], horiz: list[list[int]], vert: list[l
     width = 4 * N - 3
     border = "+" + "-" * (width + 2) + "+"
     
-    print(border)
+    if has_border:
+        print(border)
     for r in range(N):
         row_str = ""
         for c in range(N):
@@ -357,7 +358,10 @@ def print_futoshiki2(grid: list[list[int]], horiz: list[list[int]], vert: list[l
                     row_str += " > "
                 else:
                     row_str += "   "
-        print(f"| {row_str} |")
+        if has_border:
+            print(f"| {row_str} |")
+        else:
+            print(f"{row_str}")
 
         if r < N - 1:
             vert_str = ""
@@ -371,5 +375,9 @@ def print_futoshiki2(grid: list[list[int]], horiz: list[list[int]], vert: list[l
                 
                 if c < N - 1:
                     vert_str += "   "
-            print(f"| {vert_str} |")
-    print(border)
+            if has_border:
+                print(f"| {vert_str} |")
+            else:
+                print(f"{vert_str}")
+    if has_border:
+        print(border)
