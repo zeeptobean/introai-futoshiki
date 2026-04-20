@@ -182,33 +182,6 @@ def print_readable_clauses(clauses, N, limit: int | None = 30):
         
         print(" OR ".join(readable_clause))
 
-def _extract_solution(model, N):
-    """Extract grid and constraint matrices from SAT solver model.
-    
-    Args:
-        model: List of integers from solver (positive = true, negative = false).
-        N: Board size.
-    
-    Returns:
-        Tuple of (grid, horiz_constraints, vert_constraints).
-    """
-    def var(i, j, v):
-        return (i - 1) * N * N + (j - 1) * N + v
-    
-    grid = [[0] * N for _ in range(N)]
-    horiz = [[0] * (N - 1) for _ in range(N)]
-    vert = [[0] * N for _ in range(N - 1)]
-    
-    # Extract grid values from model
-    for i in range(1, N + 1):
-        for j in range(1, N + 1):
-            for v in range(1, N + 1):
-                if model[var(i, j, v) - 1] > 0:
-                    grid[i - 1][j - 1] = v
-                    break
-    
-    return grid, horiz, vert
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Solve Futoshiki puzzles using CNF and SAT solver')
     parser.add_argument('input', help='Input puzzle file path')
@@ -220,6 +193,19 @@ if __name__ == "__main__":
     
     try:
         N, givens, less_h, greater_h, less_v, greater_v = _parse_futoshiki_file(args.input)
+        
+        # Build constraint matrices from parsed lists
+        h_constraints = [[0] * (N - 1) for _ in range(N)]
+        v_constraints = [[0] * N for _ in range(N - 1)]
+        
+        for (i, j) in less_h:
+            h_constraints[i - 1][j - 1] = 1
+        for (i, j) in greater_h:
+            h_constraints[i - 1][j - 1] = -1
+        for (i, j) in less_v:
+            v_constraints[i - 1][j - 1] = 1
+        for (i, j) in greater_v:
+            v_constraints[i - 1][j - 1] = -1
         
         if args.verbose:
             print(f"Grid Size N: {N}")
@@ -244,8 +230,19 @@ if __name__ == "__main__":
             
             if solver.solve():
                 model = solver.get_model()
-                grid, horiz, vert = _extract_solution(model, N)
-                print_futoshiki2(grid, horiz, vert)
+                
+                def var(i, j, v):
+                    return (i - 1) * N * N + (j - 1) * N + v
+                
+                grid = [[0] * N for _ in range(N)]
+                for i in range(1, N + 1):
+                    for j in range(1, N + 1):
+                        for v in range(1, N + 1):
+                            if model[var(i, j, v) - 1] > 0:
+                                grid[i - 1][j - 1] = v
+                                break
+                
+                print_futoshiki2(grid, h_constraints, v_constraints)
             else:
                 print("\nUNSATISFIABLE: No valid solution exists for this board ruleset.")
     
